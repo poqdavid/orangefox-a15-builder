@@ -164,8 +164,15 @@ def check_crypto(tree, mv, device):
     if mv.get("TW_INCLUDE_CRYPTO", "").strip() != "true":
         ok("off (TW_INCLUDE_CRYPTO is not true)")
         return
-    if fox_mk_vars(tree, device).get("OF_SKIP_FBE_DECRYPTION") == "1":
+    of_vars = fox_mk_vars(tree, device)
+    of_vars.update({k: v for k, v in fox_env(tree, device).items() if k.startswith("OF_")})
+    if of_vars.get("OF_SKIP_FBE_DECRYPTION") == "1":
         fail(f"OF_SKIP_FBE_DECRYPTION=1 in fox_{device}.mk turns decryption off again")
+    if mv.get("TW_FORCE_KEYMASTER_VER", "").strip() == "true":
+        if of_vars.get("OF_DEFAULT_KEYMASTER_VERSION"):
+            ok(f"TW_FORCE_KEYMASTER_VER with OF_DEFAULT_KEYMASTER_VERSION={of_vars['OF_DEFAULT_KEYMASTER_VERSION']}")
+        else:
+            fail("TW_FORCE_KEYMASTER_VER is set but OF_DEFAULT_KEYMASTER_VERSION is not; orangefox.mk stops the build")
 
     meta, files = foxtools.read_tee_manifest(tree)
     if meta is None:
