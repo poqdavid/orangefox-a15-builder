@@ -31,7 +31,6 @@ git clone https://gitlab.com/OrangeFox/sync.git && cd sync
 ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
 cd ~/fox_12.1
 git clone https://github.com/poqdavid/android_device_samsung_a15 -b fox_12.1 device/samsung/a15
-export FOX_BUILD_DEVICE=a15
 source build/envsetup.sh
 lunch twrp_a15-eng
 mka adbd recoveryimage
@@ -41,7 +40,7 @@ mka adbd recoveryimage
 
 | Tool | Runs on | Purpose |
 |------|---------|---------|
-| `tools/preflight.py <tree>` | PC / CI | Checks the tree against the OrangeFox guidelines (fstab rules, no UI offsets, Fox vars), that every module matches the prebuilt kernel, and whether the touch drivers can load from the ramdisk |
+| `tools/preflight.py <tree>` | PC / CI | Checks the tree's layout (the one used by the official a33x/a23xq trees), the OrangeFox guidelines (fstab rules, no UI offsets, Fox vars), that every module matches the prebuilt kernel, and whether the touch drivers can load from the ramdisk |
 | `tools/check-image.py <img> <tree>` | PC / CI | Checks a built image: stock header layout, SEANDROIDENFORCE, AVB footer, size, kernel/module match, touch modules present |
 | `tools/device-info.sh` | phone (root) | Reports the values the tree depends on: cutout/status bar, backlight, partitions and sizes, MicroSD/OTG sysfs paths, current vendor fstab. `preflight.py --device-info <report>` checks the tree against it |
 | `tools/pull-vendor-files.sh <dir> [--recovery]` | PC (adb) | Copies the touch modules, their dependencies, `modules.dep` and the touch firmware from a rooted phone; `--recovery` also dumps the stock recovery partition |
@@ -49,11 +48,11 @@ mka adbd recoveryimage
 
 ### Refreshing the prebuilts from newer firmware
 
-The tree's kernel and modules come from an Android 14 recovery image, and
-its touch drivers can only be loaded from the installed ROM's `vendor_dlkm`
-(they need `tuihw-inf.ko`, which the recovery ramdisk lacks). Refreshing
-from your current firmware fixes both: use the AP file and a rooted phone
-running that same stock firmware.
+The tree's kernel, DTB, DTBO and modules all come from one stock firmware
+(named in the tree's README). The touch drivers are not part of the stock
+recovery: they and `tuihw-inf.ko`, which they need, are taken from
+`vendor_dlkm`. To move to a newer firmware, use a rooted phone running that
+stock firmware.
 
 ```bash
 # --recovery also dumps the phone's recovery partition (only while it is still stock)

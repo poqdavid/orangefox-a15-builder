@@ -52,11 +52,57 @@ def fox_env(tree, device):
     return env
 
 
+def fox_mk_vars(tree, device):
+    """OF_ variables declared in fox_<device>.mk (plain make assignments)."""
+    path = os.path.join(tree, f"fox_{device}.mk")
+    if not os.path.isfile(path):
+        return {}
+    return {k: v for k, v in foxtools.read_make_vars(path, tree).items() if k.startswith("OF_")}
+
+
+def check_layout(tree, device):
+    """The file layout of the official OrangeFox Samsung trees (a33x, a23xq)."""
+    print("layout")
+    expected = [
+        "Android.mk", "AndroidProducts.mk", "BoardConfig.mk", "README.md", "device.mk",
+        f"fox_{device}.mk", f"twrp_{device}.mk", "vendorsetup.sh", "system.prop", "mkboot/bootimg.mk",
+        "recovery/root/system/etc/recovery.fstab", "recovery/root/system/etc/twrp.flags",
+        "recovery/root/system/bin/multidisabler", "recovery/root/system/bin/postrecoveryboot.sh",
+        "recovery/root/system/bin/runatboot.sh",
+    ]
+    missing = [f for f in expected if not os.path.isfile(os.path.join(tree, f))]
+    if missing:
+        fail("missing files: " + ", ".join(missing))
+    else:
+        ok(f"all {len(expected)} expected files are present")
+    stray = ["bootimg.mk", "prebuilt/kernel", "prebuilt/dtb.img", "prebuilt/dtbo.img",
+             "recovery/root/dsms.rc", "recovery/root/dsms_common.rc",
+             "recovery/root/vendor/etc/init.insmod.mt6789.cfg"]
+    left = [f for f in stray if os.path.exists(os.path.join(tree, f))]
+    if left:
+        fail("leftover files that should have been removed or renamed: " + ", ".join(left))
+    else:
+        ok("no leftover files from the old layout")
+    bindir = os.path.join(tree, "recovery/root/system/bin")
+    if os.path.isdir(bindir):
+        noexec = [f for f in sorted(os.listdir(bindir)) if not os.access(os.path.join(bindir, f), os.X_OK)]
+        if noexec:
+            fail("not executable: " + ", ".join(noexec))
+        else:
+            ok("the scripts in system/bin are executable")
+
+
 def check_vendorsetup(tree, device):
-    print("vendorsetup.sh")
+    print(f"vendorsetup.sh / fox_{device}.mk")
     env = fox_env(tree, device)
     if not env:
         return
+    of_vars = fox_mk_vars(tree, device)
+    both = sorted(k for k in of_vars if k in env)
+    if both:
+        warn("set in both vendorsetup.sh and the fox makefile: " + ", ".join(both))
+    merged = dict(of_vars)
+    merged.update({k: v for k, v in env.items() if k.startswith(("OF_", "FOX_"))})
     required = {
         "OF_SCREEN_H": "screen height for a non-1920x1080 panel",
         "OF_STATUS_H": "status bar height for the cutout",
@@ -66,18 +112,33 @@ def check_vendorsetup(tree, device):
         "OF_MAINTAINER": "maintainer name",
     }
     for var, why in required.items():
-        if env.get(var):
-            ok(f"{var}={env[var]}")
+        if merged.get(var):
+            ok(f"{var}={merged[var]}")
         else:
-            fail(f"{var} is not exported ({why})")
+            fail(f"{var} is not set ({why})")
+    fox_in_mk = sorted(k for k in foxtools.read_make_vars(os.path.join(tree, f"fox_{device}.mk"), tree)
+                       if k.startswith("FOX_")) if of_vars else []
+    if fox_in_mk:
+        fail("FOX_ variables must be exported from vendorsetup.sh, not set in a makefile: " + ", ".join(fox_in_mk))
     if "FOX_VERSION" in env:
         fail("FOX_VERSION is obsolete and stops the build; use FOX_MAINTAINER_PATCH_VERSION")
-    if env.get("FOX_USE_SAMSUNG_SPECIAL") == "1" and os.path.isfile(os.path.join(tree, "bootimg.mk")):
-        with open(os.path.join(tree, "bootimg.mk"), encoding="utf-8") as f:
+    bootimg = os.path.join(tree, "mkboot/bootimg.mk")
+    if env.get("FOX_USE_SAMSUNG_SPECIAL") == "1" and os.path.isfile(bootimg):
+        with open(bootimg, encoding="utf-8") as f:
             if "SEANDROIDENFORCE" in f.read():
-                fail("FOX_USE_SAMSUNG_SPECIAL=1 but bootimg.mk already appends SEANDROIDENFORCE")
+                fail("FOX_USE_SAMSUNG_SPECIAL=1 but mkboot/bootimg.mk already appends SEANDROIDENFORCE")
     if env.get("FOX_BUILD_TYPE"):
         warn(f"FOX_BUILD_TYPE={env['FOX_BUILD_TYPE']} is set in the tree; set it at build time instead")
+    for var in ("FOX_SETTINGS_ROOT_DIRECTORY", "FOX_MISCELLANEOUS_ROOT_DIRECTORY"):
+        root = env.get(var)
+        if root:
+            mount = "/" + root.strip("/").split("/")[0]
+            etc = os.path.join(tree, "recovery/root/system/etc")
+            text = "".join(open(os.path.join(etc, n), encoding="utf-8").read() for n in ("recovery.fstab", "twrp.flags"))
+            if re.search(rf"(^|\s){re.escape(mount)}\s", text, re.M):
+                ok(f"{var}={root} is on a partition in the fstab")
+            else:
+                fail(f"{var}={root}: {mount} is not in recovery.fstab or twrp.flags")
 
 
 def check_boardconfig(tree):
@@ -89,7 +150,7 @@ def check_boardconfig(tree):
             fail(f"{var} is set: shifting the UI to hide the cutout is not allowed, use OF_STATUS_H")
     if not re.search(r"^\s*TW_Y_OFFSET|^\s*TW_H_OFFSET", text, re.M):
         ok("no UI offsets")
-    mv = foxtools.read_make_vars(path)
+    mv = foxtools.read_make_vars(path, tree)
     for var in ("TARGET_PREBUILT_KERNEL", "TARGET_PREBUILT_DTB", "BOARD_PREBUILT_DTBOIMAGE"):
         if var not in mv:
             warn(f"{var} not set")
@@ -157,7 +218,8 @@ def check_fstab(tree):
     else:
         fail("internal storage must mount at /storage with backup enabled")
     storage = next((e for e in flags if e[0] == "/storage"), None)
-    if storage and (len(storage) < 3 or storage[2] != "/data/media/0" or 'fsflags="bind"' not in flag_map["/storage"]):
+    if storage and (len(storage) < 3 or storage[2] != "/data/media/0"
+                    or not re.search(r'fsflags="?bind\b', flag_map["/storage"])):
         fail("/storage must bind-mount /data/media/0 (device /data/media/0, fsflags=\"bind\")")
     for bad_mp in ("/external_sd", "/usb-otg", "/usbotg"):
         if bad_mp in v2_mounts or bad_mp in flag_map:
@@ -183,7 +245,7 @@ def check_device_info(tree, report):
         fail("partitions used by the tree but missing on the phone: " + ", ".join(missing))
     else:
         ok(f"all {len(used)} by-name partitions exist on the phone")
-    mv = foxtools.read_make_vars(os.path.join(tree, "BoardConfig.mk"))
+    mv = foxtools.read_make_vars(os.path.join(tree, "BoardConfig.mk"), tree)
     for part, var in (("recovery", "BOARD_RECOVERYIMAGE_PARTITION_SIZE"), ("boot", "BOARD_BOOTIMAGE_PARTITION_SIZE"),
                       ("super", "BOARD_SUPER_PARTITION_SIZE")):
         size = re.search(rf"^{part} (\d+)$", m.group(1), re.M)
@@ -226,7 +288,7 @@ def check_modules(tree, mv):
         else:
             warn(f"{ko} cannot load from the ramdisk ({why}); touch needs the installed ROM's vendor_dlkm")
 
-    kernel = mv.get("TARGET_PREBUILT_KERNEL", "").replace("$(DEVICE_PATH)", tree)
+    kernel = mv.get("TARGET_PREBUILT_KERNEL", "")
     if not os.path.isfile(kernel):
         warn("prebuilt kernel not found; skipping vermagic check")
         return
@@ -243,7 +305,7 @@ def check_modules(tree, mv):
         ok("all modules match the prebuilt kernel")
 
     for var, label in (("TARGET_PREBUILT_DTB", "dtb"), ("BOARD_PREBUILT_DTBOIMAGE", "dtbo")):
-        p = mv.get(var, "").replace("$(DEVICE_PATH)", tree)
+        p = mv.get(var, "")
         if os.path.isfile(p):
             with open(p, "rb") as f:
                 magic = f.read(4)
@@ -261,6 +323,7 @@ def main():
     if not os.path.isfile(os.path.join(tree, "BoardConfig.mk")):
         foxtools.die(f"{tree} does not look like a device tree")
 
+    check_layout(tree, args.device)
     check_vendorsetup(tree, args.device)
     mv = check_boardconfig(tree)
     check_fstab(tree)

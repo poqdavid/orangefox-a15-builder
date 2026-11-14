@@ -43,15 +43,19 @@ def main():
     hdr, sec = foxtools.parse_bootimg(data)
 
     print("header")
+    args_mk = foxtools.mkbootimg_args(mv)
     base = num(mv["BOARD_KERNEL_BASE"])
-    check(hdr["header_version"] == num(mv["BOARD_HEADER_VERSION"]),
-          f"header v{hdr['header_version']}", f"header v{hdr['header_version']}, expected v{mv['BOARD_HEADER_VERSION']}")
-    check(hdr["page_size"] == num(mv["BOARD_PAGE_SIZE"]), f"page size {hdr['page_size']}",
-          f"page size {hdr['page_size']}, expected {mv['BOARD_PAGE_SIZE']}")
-    check(hdr["board"] == mv["BOARD_NAME"], f"board {hdr['board']}", f"board '{hdr['board']}', expected {mv['BOARD_NAME']}")
-    for field, var in (("kernel_addr", "BOARD_KERNEL_OFFSET"), ("ramdisk_addr", "BOARD_RAMDISK_OFFSET"),
-                       ("tags_addr", "BOARD_TAGS_OFFSET"), ("dtb_addr", "BOARD_DTB_OFFSET")):
-        want = (base + num(mv[var])) & 0xFFFFFFFFFFFFFFFF
+    want_version = num(args_mk["header_version"])
+    want_page = num(args_mk["pagesize"])
+    check(hdr["header_version"] == want_version,
+          f"header v{hdr['header_version']}", f"header v{hdr['header_version']}, expected v{want_version}")
+    check(hdr["page_size"] == want_page, f"page size {hdr['page_size']}",
+          f"page size {hdr['page_size']}, expected {want_page}")
+    check(hdr["board"] == args_mk["board"], f"board {hdr['board']}",
+          f"board '{hdr['board']}', expected {args_mk['board']}")
+    for field, arg in (("kernel_addr", "kernel_offset"), ("ramdisk_addr", "ramdisk_offset"),
+                       ("tags_addr", "tags_offset"), ("dtb_addr", "dtb_offset")):
+        want = (base + num(args_mk[arg])) & 0xFFFFFFFFFFFFFFFF
         check(hdr[field] == want, f"{field} 0x{hdr[field]:08x}", f"{field} 0x{hdr[field]:08x}, expected 0x{want:08x}")
     for token in mv.get("BOARD_KERNEL_CMDLINE", "").split():
         check(token in hdr["cmdline"].split(), f"cmdline has {token}", f"cmdline lacks {token}")

@@ -262,15 +262,53 @@ def cpio_entries(data):
 
 # --- device tree helpers ---------------------------------------------------
 
-def read_make_vars(path):
-    """Very small parser for simple 'VAR := value' lines in a makefile."""
-    values = {}
+_MAKE_REF = re.compile(r"\$\((\w+)\)")
+
+
+def read_make_vars(path, tree=None):
+    """Small reader for 'VAR := value' / 'VAR += value' lines in a makefile.
+
+    $(VAR) references to variables of the same file are expanded, and
+    DEVICE_PATH/LOCAL_PATH become the tree directory, so prebuilt paths can be
+    opened directly. Conditionals are not evaluated.
+    """
+    tree = tree or os.path.dirname(os.path.abspath(path))
+    raw = {}
     with open(path, encoding="utf-8") as f:
         for line in f:
-            m = re.match(r"^\s*([A-Z0-9_]+)\s*:?=\s*(.*?)\s*$", line)
-            if m:
-                values[m.group(1)] = m.group(2)
-    return values
+            m = re.match(r"^\s*([A-Za-z0-9_]+)\s*(\+=|:=|=)\s*(.*?)\s*$", line)
+            if not m or line.lstrip().startswith("#"):
+                continue
+            name, op, value = m.groups()
+            raw[name] = (raw.get(name, "") + " " + value).strip() if op == "+=" else value
+
+    def expand(value, depth=0):
+        def repl(m):
+            name = m.group(1)
+            if name in ("DEVICE_PATH", "LOCAL_PATH"):
+                return tree
+            if name in raw and depth < 8:
+                return expand(raw[name], depth + 1)
+            return m.group(0)
+        return _MAKE_REF.sub(repl, value)
+
+    return {k: expand(v) for k, v in raw.items()}
+
+
+def mkbootimg_args(mv):
+    """BOARD_MKBOOTIMG_ARGS as a dict: {'header_version': '2', 'board': 'SRP...', ...}."""
+    out = {}
+    tokens = mv.get("BOARD_MKBOOTIMG_ARGS", "").split()
+    for i, tok in enumerate(tokens):
+        if tok.startswith("--") and i + 1 < len(tokens):
+            out[tok[2:]] = tokens[i + 1].strip('"')
+    return out
+
+
+def prebuilt_paths(mv):
+    """(kernel, dtb, dtbo) paths from BoardConfig.mk."""
+    return (mv.get("TARGET_PREBUILT_KERNEL", ""), mv.get("TARGET_PREBUILT_DTB", ""),
+            mv.get("BOARD_PREBUILT_DTBOIMAGE", ""))
 
 
 def tw_vendor_modules(boardconfig):

@@ -7,7 +7,7 @@ usage:
                        [--vendor-files <dir>] [--dry-run]
 
 Replaces, all from the same stock image:
-  prebuilt/kernel, prebuilt/dtb.img, prebuilt/dtbo.img
+  the prebuilt kernel, DTB and DTBO named in BoardConfig.mk
   recovery/root/lib/modules/* (the stock recovery module set and lists)
 
 --vendor-files is the directory written by pull-vendor-files.sh on a phone
@@ -54,22 +54,23 @@ def load_recovery(path):
 def compare_layout(hdr, mv):
     """Print the stock header next to the BoardConfig values."""
     base = int(mv["BOARD_KERNEL_BASE"], 0)
+    args_mk = foxtools.mkbootimg_args(mv)
     rows = [
-        ("BOARD_HEADER_VERSION", hdr["header_version"], int(mv["BOARD_HEADER_VERSION"], 0)),
-        ("BOARD_PAGE_SIZE", hdr["page_size"], int(mv["BOARD_PAGE_SIZE"], 0)),
-        ("BOARD_NAME", hdr["board"], mv["BOARD_NAME"]),
-        ("BOARD_KERNEL_OFFSET", hdr["kernel_addr"] - base, int(mv["BOARD_KERNEL_OFFSET"], 0)),
-        ("BOARD_RAMDISK_OFFSET", hdr["ramdisk_addr"] - base, int(mv["BOARD_RAMDISK_OFFSET"], 0)),
-        ("BOARD_TAGS_OFFSET", hdr["tags_addr"] - base, int(mv["BOARD_TAGS_OFFSET"], 0)),
-        ("BOARD_DTB_OFFSET", (hdr["dtb_addr"] or 0) - base, int(mv["BOARD_DTB_OFFSET"], 0)),
+        ("--header_version", hdr["header_version"], int(args_mk["header_version"], 0)),
+        ("--pagesize", hdr["page_size"], int(args_mk["pagesize"], 0)),
+        ("--board", hdr["board"], args_mk["board"]),
+        ("--kernel_offset", hdr["kernel_addr"] - base, int(args_mk["kernel_offset"], 0)),
+        ("--ramdisk_offset", hdr["ramdisk_addr"] - base, int(args_mk["ramdisk_offset"], 0)),
+        ("--tags_offset", hdr["tags_addr"] - base, int(args_mk["tags_offset"], 0)),
+        ("--dtb_offset", (hdr["dtb_addr"] or 0) - base, int(args_mk["dtb_offset"], 0)),
     ]
     diffs = 0
-    print("\nlayout (stock image vs BoardConfig.mk)")
+    print("\nlayout (stock image vs BOARD_MKBOOTIMG_ARGS)")
     for var, stock, tree in rows:
         same = stock == tree
         diffs += not same
-        fmt = (lambda v: f"0x{v:08x}") if isinstance(stock, int) and var.endswith("OFFSET") else str
-        print(f"  {'ok  ' if same else 'DIFF'}  {var:22} stock={fmt(stock):12} tree={fmt(tree)}")
+        fmt = (lambda v: f"0x{v:08x}") if isinstance(stock, int) and var.endswith("offset") else str
+        print(f"  {'ok  ' if same else 'DIFF'}  {var:18} stock={fmt(stock):12} tree={fmt(tree)}")
     stock_cmd = set(hdr["cmdline"].split())
     tree_cmd = set(mv.get("BOARD_KERNEL_CMDLINE", "").split())
     if stock_cmd - tree_cmd:
@@ -224,14 +225,17 @@ def main():
         print("\ndry run: nothing written")
         return
 
-    prebuilt = os.path.join(tree, "prebuilt")
-    os.makedirs(prebuilt, exist_ok=True)
-    with open(os.path.join(prebuilt, "kernel"), "wb") as f:
+    kernel_path, dtb_path, dtbo_path = foxtools.prebuilt_paths(mv)
+    for path in (kernel_path, dtb_path, dtbo_path):
+        if not path.startswith(tree):
+            foxtools.die("BoardConfig.mk does not name the prebuilt kernel, DTB and DTBO inside the tree")
+    os.makedirs(os.path.dirname(kernel_path), exist_ok=True)
+    with open(kernel_path, "wb") as f:
         f.write(sec["kernel"])
-    with open(os.path.join(prebuilt, "dtb.img"), "wb") as f:
+    with open(dtb_path, "wb") as f:
         f.write(sec["dtb"])
     if sec["recovery_dtbo"]:
-        with open(os.path.join(prebuilt, "dtbo.img"), "wb") as f:
+        with open(dtbo_path, "wb") as f:
             f.write(sec["recovery_dtbo"])
 
     for old in glob.glob(os.path.join(libmod, "*")):

@@ -8,8 +8,10 @@ decryption, save logs to MicroSD or OTG, not internal storage.
 
 1. Odin: flash `*-odin.tar` in AP, Auto Reboot off.
 2. Hold Volume Up + Power with a USB cable connected until OrangeFox starts.
-3. Before booting Android, keep the recovery: root, flash a custom kernel,
-   or run `multidisabler` from the terminal (back up Boot first).
+3. OrangeFox keeps itself installed: on every boot `postrecoveryboot.sh`
+   checks whether boot is still the pristine stock image and, if so, runs
+   `multidisabler` to repack it. With a rooted or custom boot image it does
+   nothing. Check `/tmp/recovery.log` for the "multidisabler:" lines.
 
 If the screen stays black or the phone reboots to Download mode, keep a
 copy of `/sys/fs/pstore/console-ramoops*` if you can still get it from
@@ -30,9 +32,9 @@ partitions and sizes after a firmware update.
 | Vibrator | `/sys/class/timed_output/vibrator` | confirmed |
 | Partition sizes | recovery 80 MiB, boot 64 MiB, super 11744051200 | confirmed |
 | Partitions in fstab | all 20 exist, including dtbo, vbmeta_system, vbmeta_vendor | confirmed |
-| EFS | `sec_efs` is Android's `/efs`; `efs` is `/mnt/vendor/efs` (`/vendor_efs` in recovery) | confirmed |
-| `/sdcard1` sysfs | `/devices/platform/soc/11240000.mmc*` | confirmed |
-| `/usb_otg` sysfs | `/devices/platform/soc/mt_usb*` (stock vold entry; the musb driver renames `11200000.usb0` to `mt_usb`) | not tested: check with an OTG drive in recovery |
+| EFS | `efs` (Android: `/mnt/vendor/efs`) is `/efs` in recovery; `sec_efs` (Android: `/efs`) is `/sec_efs` | confirmed |
+| `/sdcard1` | `/dev/block/mmcblk0p1` (`mmcblk0` is the MicroSD; storage is UFS) | confirmed in Android; check in recovery |
+| `/usb_otg` | `/dev/block/sdd1` (first SCSI disk after the UFS LUNs `sda`-`sdc`) | not tested: check with an OTG drive in recovery (`ls /dev/block/sd*`) |
 | Touch drivers | `zt7650m_ts.ko`, `focaltech_ts_ft3418.ko` and `tuihw-inf.ko` in `vendor_dlkm` | confirmed |
 
 ## Test suite
@@ -46,7 +48,10 @@ Basic:
 - [ ] Backup to MicroSD and to OTG
 - [ ] Read and write MicroSD (FAT32 and exFAT) and OTG (FAT32, exFAT, NTFS)
 - [ ] Format Data, then boot Android
-- [ ] Settings persist after a reboot
+- [ ] Settings persist after a reboot. They are stored in `/cache/Fox`
+      (`FOX_SETTINGS_ROOT_DIRECTORY`), prepared by `runatboot.sh`; check
+      that the folder exists and that a changed setting survives a reboot to
+      Android and back
 - [ ] Built-in features: terminal, file manager, Fox addons, reboot to
       system/recovery/download/power off
 - [ ] MTP in recovery
@@ -80,14 +85,7 @@ Device:
 - No /data decryption (Samsung TEEGRIS). Internal storage is only readable
   between Format Data and the next Android boot, which encrypts it again;
   use MicroSD, OTG or ADB sideload.
-- Settings, themes and the recovery password live under /sdcard/Fox, so
-  they are lost once Android encrypts /data again.
-  `FOX_USE_DATA_RECOVERY_FOR_SETTINGS=1` (experimental) keeps them in
-  /data/recovery instead; worth a separate test build.
-- Touch needs a stock-based ROM until the tree is refreshed with
-  `extract-prebuilts.py --vendor-files`: the touch drivers need
-  `tuihw-inf.ko`, which the stock recovery ramdisk does not have, so the
-  recovery takes them from the installed ROM's `vendor_dlkm`.
-  `preflight.py` shows which case the tree is in.
+- Settings, themes and the recovery password are stored in the cache
+  partition (`/cache/Fox`), so wiping cache resets them.
 - No flashlight (the flash LED modules aren't in the recovery ramdisk).
 - No CPU temperature (thermal modules aren't loaded in recovery).
