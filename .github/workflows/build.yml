@@ -1,0 +1,195 @@
+name: Build OrangeFox (a15)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tree_url:
+        description: Device tree repository
+        required: true
+        default: https://github.com/poqdavid/android_device_samsung_a15
+      tree_ref:
+        description: Device tree branch, tag or commit
+        required: true
+        default: fox_12.1
+      build_type:
+        description: FOX_BUILD_TYPE (Alpha/Beta/Stable are for the official maintainer only)
+        type: choice
+        options: [Unofficial, Alpha, Beta, Stable]
+        default: Unofficial
+      patch_version:
+        description: FOX_MAINTAINER_PATCH_VERSION (empty = value from vendorsetup.sh)
+        required: false
+        default: ""
+      draft_release:
+        description: Attach the files to a draft GitHub release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  FOX_BRANCH: "12.1"
+  DEVICE: a15
+  DEVICE_PATH: device/samsung/a15
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out builder
+        uses: actions/checkout@v4
+        with:
+          path: builder
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Add swap
+        run: |
+          # keep the swap file off the build disk when the runner has a second one
+          sudo swapoff -a || true
+          if mountpoint -q /mnt && [ "$(df --output=avail -BG /mnt | tail -n 1 | tr -dc 0-9)" -ge 20 ]; then
+            swapfile=/mnt/fox-swap; size=16G
+          else
+            swapfile=/fox-swap; size=8G
+          fi
+          sudo fallocate -l "$size" "$swapfile"
+          sudo chmod 600 "$swapfile"
+          sudo mkswap "$swapfile"
+          sudo swapon "$swapfile"
+          free -h
+          df -h / /mnt || true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          git clone --depth 1 https://gitlab.com/OrangeFox/misc/scripts.git "$RUNNER_TEMP/fox-scripts"
+          cd "$RUNNER_TEMP/fox-scripts"
+          sudo bash setup/android_build_env.sh
+          # Ubuntu 24.04 blocks the unprivileged user namespaces the build sandbox uses
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Sync OrangeFox fox_${{ env.FOX_BRANCH }}
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git clone --depth 1 https://gitlab.com/OrangeFox/sync.git "$RUNNER_TEMP/fox-sync"
+          cd "$RUNNER_TEMP/fox-sync"
+          ./orangefox_sync.sh --branch "$FOX_BRANCH" --path "$GITHUB_WORKSPACE/fox"
+
+      - name: Clone device tree
+        env:
+          TREE_URL: ${{ inputs.tree_url }}
+          TREE_REF: ${{ inputs.tree_ref }}
+        run: |
+          git clone --no-checkout "$TREE_URL" "fox/$DEVICE_PATH"
+          cd "fox/$DEVICE_PATH"
+          # a branch or tag is fetched by name; a (short) commit is already in the clone
+          if git fetch origin "$TREE_REF"; then
+            git checkout --detach FETCH_HEAD
+          else
+            git checkout --detach "$TREE_REF"
+          fi
+          echo "TREE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git log -1 --format='%H %s'
+
+      - name: Preflight checks
+        run: python3 builder/tools/preflight.py "fox/$DEVICE_PATH" --device "$DEVICE"
+
+      - name: Build
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+          PATCH_VERSION: ${{ inputs.patch_version }}
+        run: |
+          cd fox
+          export FOX_BUILD_DEVICE="$DEVICE"
+          if [ "$BUILD_TYPE" != "Unofficial" ]; then export FOX_BUILD_TYPE="$BUILD_TYPE"; fi
+          if [ -n "$PATCH_VERSION" ]; then export FOX_MAINTAINER_PATCH_VERSION="$PATCH_VERSION"; fi
+          set +eu
+          source build/envsetup.sh
+          lunch "twrp_${DEVICE}-eng" || exit 1
+          set -eo pipefail
+          mka adbd recoveryimage 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Package
+        env:
+          TREE_URL: ${{ inputs.tree_url }}
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          out="fox/out/target/product/$DEVICE"
+          img=$(find "$out" -maxdepth 4 -name 'OrangeFox-*.img' | head -n 1)
+          zip=$(find "$out" -maxdepth 4 -name 'OrangeFox-*.zip' | head -n 1)
+          if [ ! -f "$img" ] || [ ! -f "$zip" ]; then
+            echo "OrangeFox image or zip missing"; ls -la "$out"; exit 1
+          fi
+          echo "IMG=$img" >> "$GITHUB_ENV"
+          name=$(basename "$img" .img)
+          mkdir -p dist
+          cp "$img" "$zip" dist/
+          # Odin wants recovery.img inside a ustar archive
+          cp "$img" "$RUNNER_TEMP/recovery.img"
+          tar -H ustar -C "$RUNNER_TEMP" -cf "dist/$name-odin.tar" recovery.img
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          {
+            echo "## $name"
+            echo
+            echo "- Device tree: $TREE_URL @ \`$TREE_COMMIT\`"
+            echo "- Manifest: fox_$FOX_BRANCH"
+            echo "- Build type: $BUILD_TYPE"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY" > dist/BUILD_INFO.md
+          echo "BUILD_NAME=$name" >> "$GITHUB_ENV"
+
+      - name: Check image
+        id: check
+        continue-on-error: true
+        shell: bash
+        run: python3 builder/tools/check-image.py "$IMG" "fox/$DEVICE_PATH" | tee dist/CHECK.txt
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUILD_NAME }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Fail on image check
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "check-image.py reported problems, see CHECK.txt in the artifact"
+          exit 1
+
+      - name: Draft release
+        if: inputs.draft_release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ env.BUILD_NAME }}
+          name: ${{ env.BUILD_NAME }}
+          body_path: dist/BUILD_INFO.md
+          files: |
+            dist/*.img
+            dist/*.zip
+            dist/*.tar
+            dist/SHA256SUMS
