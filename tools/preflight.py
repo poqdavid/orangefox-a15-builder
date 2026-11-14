@@ -202,10 +202,30 @@ def check_crypto(tree, mv, device):
              f"from {meta.get('security_patch')} / {meta.get('vendor_security_patch')}; "
              "run install-tee-files.py to set them")
     root_sh = os.path.join(tree, "recovery/root/system/bin/prepare_tee.sh")
-    if os.path.isfile(root_sh) and "ro.build.version.security_patch" in open(root_sh, encoding="utf-8").read():
+    script = open(root_sh, encoding="utf-8").read() if os.path.isfile(root_sh) else ""
+    if "ro.build.version.security_patch" in script:
         ok("prepare_tee.sh reports the installed firmware's versions to keymint")
     else:
         fail("prepare_tee.sh does not set ro.build.version.security_patch from the installed firmware")
+    if "tee-files.list" in script:
+        ok("prepare_tee.sh takes the TEE files from the installed firmware")
+    else:
+        fail("prepare_tee.sh does not copy the files on tee-files.list from the installed firmware")
+
+    blist = os.path.join(tree, foxtools.TEE_BOOT_LIST)
+    if os.path.isfile(blist):
+        boot = set(foxtools.read_tee_boot_list(open(blist, encoding="utf-8").read()))
+        unlisted = [phone for _sha, _rel, phone in files if phone.startswith("/vendor/") and phone not in boot]
+        outside = [p for p in boot if not p.startswith("/vendor/")]
+        if unlisted or outside:
+            fail("tee-files.list does not match tee-files.txt; run install-tee-files.py again")
+        else:
+            ok(f"tee-files.list: {len(boot)} files are taken from the installed firmware at boot")
+    else:
+        fail(f"{foxtools.TEE_BOOT_LIST} is missing; run install-tee-files.py again")
+    if "TARGET_RECOVERY_DEVICE_MODULES" in mv and "gatekeeper@1.0-impl" in mv["TARGET_RECOVERY_DEVICE_MODULES"]:
+        fail("the AOSP gatekeeper implementation is built and relinked into system/lib64, where HIDL "
+             "does not look; the stock one is taken from the firmware")
 
     root = os.path.join(tree, "recovery/root")
     rcs = [os.path.join(root, n) for n in os.listdir(root) if n.startswith("init.recovery.") and n.endswith(".rc")]

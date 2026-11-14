@@ -96,9 +96,12 @@ def main():
     kind, ramdisk = foxtools.decompress(sec["ramdisk"])
     print(f"  info  ramdisk is {kind}, {len(ramdisk)} bytes uncompressed")
     names = set()
+    boot_list = None
     bad = []
     for name, _mode, payload in foxtools.cpio_entries(ramdisk):
         names.add(name)
+        if name == foxtools.TEE_BOOT_LIST[len("recovery/root/"):]:
+            boot_list = foxtools.read_tee_boot_list(payload.decode("utf-8", "replace"))
         if name.endswith(".ko"):
             vm = foxtools._VERMAGIC_RE.search(payload)
             vm = vm.group(1).decode(errors="replace") if vm else ""
@@ -124,16 +127,25 @@ def main():
         print("decryption")
         _meta, files = foxtools.read_tee_manifest(args.tree)
         wanted = [rel[len("recovery/root/"):] for _sha, rel, _phone in files] + [
-            "init.recovery.teegris.rc", "system/bin/prepare_tee.sh",
-            "vendor/bin/hw/android.hardware.gatekeeper@1.0-service"]
+            "init.recovery.teegris.rc", "system/bin/prepare_tee.sh"]
         missing = [w for w in wanted if w not in names]
         check(not missing, f"{len(wanted)} TEE files and scripts in the ramdisk",
               "missing from the ramdisk: " + ", ".join(missing[:6]))
+        check(boot_list is not None, f"tee-files.list: {len(boot_list or [])} files taken from the firmware at boot",
+              "vendor/etc/tee-files.list is missing, so nothing is taken from the firmware at boot")
+        boot = set(boot_list or [])
         # HIDL passthrough only looks in {odm,vendor,system}/lib64/hw
+        gk = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service"
+        check(gk[1:] in names or gk in boot, "gatekeeper service", "the gatekeeper service is neither "
+              "in the ramdisk nor on tee-files.list")
         impl = [n for n in names if n.endswith("/lib64/hw/android.hardware.gatekeeper@1.0-impl.so")]
-        check(bool(impl), f"gatekeeper implementation at {impl[0] if impl else ''}",
+        impl += [p[1:] for p in boot if p == "/vendor/lib64/hw/android.hardware.gatekeeper@1.0-impl.so"]
+        check(bool(impl), f"gatekeeper implementation at /{impl[0] if impl else ''}",
               "android.hardware.gatekeeper@1.0-impl.so is not in a lib64/hw directory, "
               "so the gatekeeper service cannot load it")
+        stray = [n for n in names if n.startswith("system/lib64/") and n.endswith("-impl.so")]
+        check(not stray, "no passthrough implementations in system/lib64",
+              "passthrough implementations in system/lib64, where HIDL does not look: " + ", ".join(stray))
 
     print()
     print(f"{len(failures)} failure(s)")

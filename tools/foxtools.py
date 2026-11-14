@@ -420,6 +420,12 @@ def read_props(path):
 # --- TEE files ---------------------------------------------------------------
 
 TEE_MANIFEST = "tee-files.txt"
+TEE_BOOT_LIST = "recovery/root/vendor/etc/tee-files.list"
+
+
+def read_tee_boot_list(text):
+    """Phone paths in tee-files.list."""
+    return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
 
 def read_tee_manifest(tree):

@@ -12,8 +12,12 @@ and the keymint, fkeymaster, gatekeeper and weaver services:
   - every library they load from /vendor, and the VNDK libraries the
     recovery does not have itself
 
-The trusted apps (/vendor/tee) are not copied: recovery takes them from the
-installed firmware at boot, so they always match its TEE.
+These copies are a fallback. At boot, prepare_tee.sh replaces every file on
+the list it writes (recovery/root/vendor/etc/tee-files.list) with the
+installed firmware's own copy, so the services always match the firmware;
+files not in the pulled set (such as the gatekeeper passthrough
+implementation from an older pull) are only taken from the firmware at
+boot. The trusted apps (/vendor/tee) are always taken from the firmware.
 
 It writes tee-files.txt (the firmware, its Android version and patch levels,
 and a sha256 per file) and sets PLATFORM_SECURITY_PATCH in BoardConfig.mk to
@@ -50,6 +54,9 @@ HAL_MODULES = [
     "/vendor/lib64/hw/android.hardware.gatekeeper@1.0-impl.so",
     "/vendor/lib64/hw/gatekeeper.{platform}.so",
 ]
+# may be missing from an older pull: then only copied from the firmware at boot
+BOOT_ONLY_OK = {"/vendor/lib64/hw/android.hardware.gatekeeper@1.0-impl.so"}
+BOOT_LIST = "recovery/root/vendor/etc/tee-files.list"
 
 BIONIC = {"libc.so", "libm.so", "libdl.so", "libdl_android.so", "ld-android.so"}
 # in the recovery's /system/lib64 when TW_INCLUDE_CRYPTO is on (TWRP relinks
@@ -60,7 +67,7 @@ RECOVERY_PROVIDES = {
     "libutilscallstack.so", "libhidlbase.so", "libhwbinder.so", "libbinder.so", "libbinder_ndk.so",
     "liblog.so", "libhardware.so", "libhardware_legacy.so", "libprocessgroup.so", "libcgrouprc.so",
     "libvndksupport.so", "libz.so", "libunwindstack.so", "libbacktrace.so",
-    "android.system.suspend@1.0.so",
+    "android.system.suspend@1.0.so", "android.hardware.gatekeeper@1.0.so",
     "android.hardware.security.keymint-V1-ndk_platform.so",
     "android.hardware.security.secureclock-V1-ndk_platform.so",
     "android.hardware.security.sharedsecret-V1-ndk_platform.so",
@@ -212,10 +219,13 @@ def main():
 
         roots = SERVICES + [m.format(platform=platform) for m in HAL_MODULES]
         absent = [r for r in roots if not pulled.exists(r)]
-        if absent:
-            foxtools.die("not in the pulled files: " + ", ".join(absent)
+        fatal = [r for r in absent if r not in BOOT_ONLY_OK]
+        if fatal:
+            foxtools.die("not in the pulled files: " + ", ".join(fatal)
                          + "\npull them again with the current pull-tee-files.py")
-        chosen = plan(pulled, roots)
+        for r in absent:
+            print(f"note: {r} is not in the pulled files; recovery takes it from the firmware at boot")
+        chosen = plan(pulled, [r for r in roots if r not in absent])
 
         # remove what an earlier run installed
         _, old_files = foxtools.read_tee_manifest(tree)
@@ -245,9 +255,19 @@ def main():
             f.write("# sha256 tree-path phone-path\n")
             f.write("\n".join(lines) + "\n")
 
+        # what prepare_tee.sh refreshes from the installed vendor at boot
+        boot = sorted({p for p in chosen if p.startswith("/vendor/")} | set(absent))
+        dest = os.path.join(tree, *BOOT_LIST.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write("# TEE files prepare_tee.sh copies from the installed vendor at boot\n"
+                    "# (written by install-tee-files.py)\n")
+            f.write("\n".join(boot) + "\n")
+
         old = set_patch_levels(boardconfig, spl, vendor_spl)
         total = sum(len(d) for d in chosen.values())
-        print(f"\ninstalled {len(chosen)} files ({total / 1048576:.1f} MiB), wrote {foxtools.TEE_MANIFEST}")
+        print(f"\ninstalled {len(chosen)} files ({total / 1048576:.1f} MiB), wrote {foxtools.TEE_MANIFEST}"
+              f" and {BOOT_LIST} ({len(boot)} files)")
         if old != spl:
             print(f"PLATFORM_SECURITY_PATCH: {old} -> {spl}")
         return 0
