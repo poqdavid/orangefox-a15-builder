@@ -85,9 +85,15 @@ Device:
 Recovery starts Samsung's TEE (TEEGRIS) and the keymint, fkeymaster,
 gatekeeper and weaver (hermesd) services, and decrypts /data with them
 (`init.recovery.teegris.rc`, `prepare_tee.sh` in the tree). The /data keys
-are bound to the Android version and patch levels, so `prepare_tee.sh` only
-starts the TEE when the installed firmware has exactly the patch levels in
-the tree's `tee-files.txt`.
+are bound to the Android version, the OS and vendor patch levels and the
+boot patch level. The keymint trusted app takes the first three from the
+keymint service (the `ro.build.version.release`,
+`ro.build.version.security_patch` and `ro.vendor.build.security_patch`
+properties) and uses the image header only when those are missing or
+malformed; the boot patch level comes from vbmeta, the same under Android
+and recovery. `prepare_tee.sh` sets the three properties to the installed
+firmware's values before keymint starts, so the TEE sees what it sees under
+Android on any firmware date.
 
 Before the first test:
 
@@ -114,8 +120,9 @@ for each):
       released, and an EFS backup restores
 - [ ] Android boots normally afterwards and the lock screen accepts the PIN
       (the keys are untouched)
-- [ ] Recovery built for another patch level than the installed firmware:
-      `/tmp/tee.log` says "decryption off", OrangeFox still starts
+- [ ] After a firmware update (a newer security patch than the one in
+      `tee-files.txt`): still decrypts, `/tmp/tee.log` shows the new patch
+      levels, and Android still accepts the PIN afterwards
 
 If decryption fails, `/tmp/tee.log` and the lines tagged `tee:` in dmesg
 show whether the TEE was started; `logcat -d | grep -iE
@@ -124,9 +131,9 @@ stopped.
 
 ## Known limitations to state in every release
 
-- /data decryption only works on the stock firmware the build was made for
-  (same security patch, see `tee-files.txt`); on other firmware OrangeFox
-  starts without decryption.
+- /data decryption needs a stock vendor partition (the TEE trusted apps and
+  the versions are read from the installed firmware); without one,
+  OrangeFox starts without decryption.
 - Settings, themes and the recovery password are stored in the cache
   partition (`/cache/Fox`), so wiping cache resets them.
 - No flashlight (the flash LED modules aren't in the recovery ramdisk).

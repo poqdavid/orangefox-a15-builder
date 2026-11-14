@@ -16,9 +16,9 @@ installed firmware at boot, so they always match its TEE.
 
 It writes tee-files.txt (the firmware, its Android version and patch levels,
 and a sha256 per file) and sets PLATFORM_SECURITY_PATCH in BoardConfig.mk to
-the firmware's. The keys are bound to the patch level, so recovery only
-starts the TEE on firmware with exactly these patch levels. Run this again,
-with files pulled from the new firmware, for every firmware update.
+the firmware's, so the image header matches the stock recovery of that
+firmware. At boot, recovery reports the installed firmware's versions to the
+TEE, so the files only need refreshing when Samsung changes the TEE services.
 """
 
 import argparse
@@ -230,9 +230,8 @@ def main():
 
         with open(os.path.join(tree, foxtools.TEE_MANIFEST), "w", encoding="utf-8") as f:
             f.write("# Samsung TEE files for /data decryption, written by install-tee-files.py\n"
-                    "# from the stock firmware below. Recovery starts the TEE only when the\n"
-                    "# installed firmware has these patch levels; refresh the files and\n"
-                    "# PLATFORM_SECURITY_PATCH for every firmware update.\n")
+                    "# from the stock firmware below. At boot, recovery reports the installed\n"
+                    "# firmware's versions to the TEE, whatever these are.\n")
             f.write(f"firmware={firmware}\nandroid={android}\n"
                     f"security_patch={spl}\nvendor_security_patch={vendor_spl}\n\n")
             f.write("# sha256 tree-path phone-path\n")

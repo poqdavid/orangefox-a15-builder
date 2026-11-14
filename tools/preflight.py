@@ -185,13 +185,20 @@ def check_crypto(tree, mv, device):
     else:
         ok(f"{len(files)} TEE files from {meta.get('firmware')} match tee-files.txt")
 
+    # the TEE takes the versions from keymint (prepare_tee.sh sets them to the
+    # installed firmware's); the header only mirrors the stock recovery
     spl, vendor_spl = mv.get("PLATFORM_SECURITY_PATCH", ""), mv.get("VENDOR_SECURITY_PATCH", "")
     if spl == meta.get("security_patch") and vendor_spl == meta.get("vendor_security_patch"):
-        ok(f"patch levels {spl} / {vendor_spl} are the firmware's")
+        ok(f"patch levels {spl} / {vendor_spl} are those of {meta.get('firmware')}, as in its stock recovery")
     else:
-        fail(f"PLATFORM_SECURITY_PATCH={spl}, VENDOR_SECURITY_PATCH={vendor_spl}, but the TEE files are "
-             f"from {meta.get('security_patch')} / {meta.get('vendor_security_patch')}: the keys are bound "
-             "to the patch level, so these must be equal")
+        warn(f"PLATFORM_SECURITY_PATCH={spl}, VENDOR_SECURITY_PATCH={vendor_spl}, but the TEE files are "
+             f"from {meta.get('security_patch')} / {meta.get('vendor_security_patch')}; "
+             "run install-tee-files.py to set them")
+    root_sh = os.path.join(tree, "recovery/root/system/bin/prepare_tee.sh")
+    if os.path.isfile(root_sh) and "ro.build.version.security_patch" in open(root_sh, encoding="utf-8").read():
+        ok("prepare_tee.sh reports the installed firmware's versions to keymint")
+    else:
+        fail("prepare_tee.sh does not set ro.build.version.security_patch from the installed firmware")
 
     root = os.path.join(tree, "recovery/root")
     rcs = [os.path.join(root, n) for n in os.listdir(root) if n.startswith("init.recovery.") and n.endswith(".rc")]
