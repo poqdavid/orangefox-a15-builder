@@ -275,7 +275,9 @@ def read_make_vars(path, tree=None):
     tree = tree or os.path.dirname(os.path.abspath(path))
     raw = {}
     with open(path, encoding="utf-8") as f:
-        for line in f:
+        # join lines continued with a trailing backslash
+        lines = re.sub(r"\\[ \t]*\n", " ", f.read()).splitlines()
+        for line in lines:
             m = re.match(r"^\s*([A-Za-z0-9_]+)\s*(\+=|:=|=)\s*(.*?)\s*$", line)
             if not m or line.lstrip().startswith("#"):
                 continue
@@ -387,3 +389,55 @@ def elf_info(data):
         return data[start:stop if stop >= 0 else None].decode("utf-8", "replace")
 
     return bits, [string(i) for i in needed], (string(soname_idx) if soname_idx is not None else None)
+
+
+# --- versions and props ------------------------------------------------------
+
+def os_version_str(value):
+    """Decode a boot header os_version field: ('12.0.0', '2025-08'), or (None, None)."""
+    if not value:
+        return None, None
+    ver, patch = value >> 11, value & 0x7FF
+    version = f"{(ver >> 14) & 0x7F}.{(ver >> 7) & 0x7F}.{ver & 0x7F}"
+    return version, f"{(patch >> 4) + 2000:04d}-{patch & 0xF:02d}"
+
+
+def read_props(path):
+    """name=value lines of a build.prop style file."""
+    props = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    props[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
+    return props
+
+
+# --- TEE files ---------------------------------------------------------------
+
+TEE_MANIFEST = "tee-files.txt"
+
+
+def read_tee_manifest(tree):
+    """(meta, files) from tee-files.txt; files are (sha256, tree path, phone path)."""
+    meta, files = {}, []
+    path = os.path.join(tree, TEE_MANIFEST)
+    if not os.path.isfile(path):
+        return None, []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line and " " not in line:
+                k, v = line.split("=", 1)
+                meta[k] = v
+            else:
+                parts = line.split()
+                if len(parts) == 3:
+                    files.append(tuple(parts))
+    return meta, files

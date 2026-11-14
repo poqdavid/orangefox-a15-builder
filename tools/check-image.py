@@ -59,6 +59,17 @@ def main():
         check(hdr[field] == want, f"{field} 0x{hdr[field]:08x}", f"{field} 0x{hdr[field]:08x}, expected 0x{want:08x}")
     for token in mv.get("BOARD_KERNEL_CMDLINE", "").split():
         check(token in hdr["cmdline"].split(), f"cmdline has {token}", f"cmdline lacks {token}")
+    version, patch = foxtools.os_version_str(hdr["os_version"])
+    crypto = mv.get("TW_INCLUDE_CRYPTO", "").strip() == "true"
+    if crypto:
+        # the TEE sees these; they must be the firmware's (see tee-files.txt)
+        want_version = mv.get("PLATFORM_VERSION", "")
+        want_patch = mv.get("PLATFORM_SECURITY_PATCH", "")[:7]
+        check(version is not None and version.split(".")[0] == want_version.split(".")[0],
+              f"os version {version}", f"os version {version}, expected {want_version}")
+        check(patch == want_patch, f"os patch level {patch}", f"os patch level {patch}, expected {want_patch}")
+    else:
+        print(f"  info  os version {version}, patch level {patch}")
 
     print("payload")
     check(len(sec["dtb"]) > 0 and sec["dtb"][:4] == foxtools.DT_TABLE_MAGIC, f"dtb ({len(sec['dtb'])} bytes)", "dtb missing")
@@ -108,6 +119,19 @@ def main():
             print(f"  note  {ko} is not loadable from the ramdisk; touch needs the ROM's vendor_dlkm")
     for f in ("system/etc/recovery.fstab", "system/etc/twrp.flags", "lib/modules/modules.load.recovery"):
         check(f in names, f"{f} in ramdisk", f"{f} missing from the ramdisk")
+
+    if crypto:
+        print("decryption")
+        _meta, files = foxtools.read_tee_manifest(args.tree)
+        wanted = [rel[len("recovery/root/"):] for _sha, rel, _phone in files] + [
+            "init.recovery.teegris.rc", "system/bin/prepare_tee.sh",
+            "vendor/bin/hw/android.hardware.gatekeeper@1.0-service"]
+        missing = [w for w in wanted if w not in names]
+        check(not missing, f"{len(wanted)} TEE files and scripts in the ramdisk",
+              "missing from the ramdisk: " + ", ".join(missing[:6]))
+        impl = [n for n in names if n.endswith("android.hardware.gatekeeper@1.0-impl.so")]
+        check(bool(impl), f"gatekeeper impl at {impl[0] if impl else ''}",
+              "android.hardware.gatekeeper@1.0-impl.so missing from the ramdisk")
 
     print()
     print(f"{len(failures)} failure(s)")

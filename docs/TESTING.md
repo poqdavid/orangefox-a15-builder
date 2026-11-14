@@ -80,11 +80,53 @@ Device:
 - [ ] Vibration (sec_vibrator, `/sys/class/timed_output/vibrator`)
 - [ ] Status bar clears the cutout; clock left and right; rounded corners
 
+## Decryption
+
+Recovery starts Samsung's TEE (TEEGRIS) and the keymint, fkeymaster,
+gatekeeper and weaver (hermesd) services, and decrypts /data with them
+(`init.recovery.teegris.rc`, `prepare_tee.sh` in the tree). The /data keys
+are bound to the Android version and patch levels, so `prepare_tee.sh` only
+starts the TEE when the installed firmware has exactly the patch levels in
+the tree's `tee-files.txt`.
+
+Before the first test:
+
+- Back up `efs` and `sec_efs` from Android, to MicroSD or a PC:
+  `dd if=/dev/block/by-name/efs of=/sdcard/efs.img` (and `sec_efs`), then
+  copy them off the phone. The TEE writes its secure storage to efs, as
+  Android does on every boot.
+- Back up what matters on internal storage. Decryption only reads keys, but
+  a first test build is still a first test build.
+- Enter the lock screen PIN carefully: wrong guesses count towards the
+  lock screen's attempt limit and timeouts, as on the lock screen.
+
+Tests (save `/tmp/recovery.log`, `/tmp/tee.log`, `dmesg` and `logcat -d`
+for each):
+
+- [ ] Lock screen with PIN: the password prompt appears and accepts it;
+      internal storage shows the real files
+- [ ] The same with a password and with a pattern, and with no lock screen
+      (decrypts without a prompt)
+- [ ] Wrong PIN: rejected, no crash; the right one works afterwards
+- [ ] After decrypting: `getprop vendor.recovery.tee_state` is `stopped`
+      and `/mnt/vendor/efs` is no longer mounted
+- [ ] Skip the prompt, then `setprop vendor.recovery.tee_stop 1`: efs is
+      released, and an EFS backup restores
+- [ ] Android boots normally afterwards and the lock screen accepts the PIN
+      (the keys are untouched)
+- [ ] Recovery built for another patch level than the installed firmware:
+      `/tmp/tee.log` says "decryption off", OrangeFox still starts
+
+If decryption fails, `/tmp/tee.log` and the lines tagged `tee:` in dmesg
+show whether the TEE was started; `logcat -d | grep -iE
+"keymint|tzdaemon|gatekeeper|weaver|hermes|vold|keystore2"` shows where it
+stopped.
+
 ## Known limitations to state in every release
 
-- No /data decryption (Samsung TEEGRIS). Internal storage is only readable
-  between Format Data and the next Android boot, which encrypts it again;
-  use MicroSD, OTG or ADB sideload.
+- /data decryption only works on the stock firmware the build was made for
+  (same security patch, see `tee-files.txt`); on other firmware OrangeFox
+  starts without decryption.
 - Settings, themes and the recovery password are stored in the cache
   partition (`/cache/Fox`), so wiping cache resets them.
 - No flashlight (the flash LED modules aren't in the recovery ramdisk).

@@ -7,6 +7,7 @@ Exit status is non-zero if any check fails.
 """
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -155,6 +156,67 @@ def check_boardconfig(tree):
         if var not in mv:
             warn(f"{var} not set")
     return mv
+
+
+def check_crypto(tree, mv, device):
+    """Decryption with Samsung's TEE: the blobs, patch levels and init wiring."""
+    print("decryption")
+    if mv.get("TW_INCLUDE_CRYPTO", "").strip() != "true":
+        ok("off (TW_INCLUDE_CRYPTO is not true)")
+        return
+    if fox_mk_vars(tree, device).get("OF_SKIP_FBE_DECRYPTION") == "1":
+        fail(f"OF_SKIP_FBE_DECRYPTION=1 in fox_{device}.mk turns decryption off again")
+
+    meta, files = foxtools.read_tee_manifest(tree)
+    if meta is None:
+        fail(f"{foxtools.TEE_MANIFEST} is missing; install the TEE files with install-tee-files.py")
+        return
+    bad = []
+    for sha, rel, _phone in files:
+        p = os.path.join(tree, rel)
+        if not os.path.isfile(p):
+            bad.append(f"{rel} (missing)")
+        else:
+            with open(p, "rb") as f:
+                if hashlib.sha256(f.read()).hexdigest() != sha:
+                    bad.append(f"{rel} (changed)")
+    if bad:
+        fail("TEE files do not match tee-files.txt: " + ", ".join(bad[:5]))
+    else:
+        ok(f"{len(files)} TEE files from {meta.get('firmware')} match tee-files.txt")
+
+    spl, vendor_spl = mv.get("PLATFORM_SECURITY_PATCH", ""), mv.get("VENDOR_SECURITY_PATCH", "")
+    if spl == meta.get("security_patch") and vendor_spl == meta.get("vendor_security_patch"):
+        ok(f"patch levels {spl} / {vendor_spl} are the firmware's")
+    else:
+        fail(f"PLATFORM_SECURITY_PATCH={spl}, VENDOR_SECURITY_PATCH={vendor_spl}, but the TEE files are "
+             f"from {meta.get('security_patch')} / {meta.get('vendor_security_patch')}: the keys are bound "
+             "to the patch level, so these must be equal")
+
+    root = os.path.join(tree, "recovery/root")
+    rcs = [os.path.join(root, n) for n in os.listdir(root) if n.startswith("init.recovery.") and n.endswith(".rc")]
+    imported = any("import /init.recovery.teegris.rc" in open(r, encoding="utf-8").read() for r in rcs)
+    if os.path.isfile(os.path.join(root, "init.recovery.teegris.rc")) and imported:
+        ok("init.recovery.teegris.rc is present and imported")
+    else:
+        fail("init.recovery.teegris.rc is missing or not imported from init.recovery.<hardware>.rc")
+    if os.path.isfile(os.path.join(root, "system/bin/prepare_tee.sh")):
+        ok("prepare_tee.sh is present")
+    else:
+        fail("recovery/root/system/bin/prepare_tee.sh is missing")
+
+    props = foxtools.read_props(os.path.join(tree, "vendor.prop"))
+    if props.get("ro.hardware.keystore") and "vendor.prop" in mv.get("TARGET_VENDOR_PROP", ""):
+        ok(f"vendor.prop sets ro.hardware.keystore={props['ro.hardware.keystore']}")
+    else:
+        fail("vendor.prop with ro.hardware.keystore is missing or not in TARGET_VENDOR_PROP")
+
+    fstab = os.path.join(root, "system/etc/recovery.fstab")
+    data = [l for l in open(fstab, encoding="utf-8") if re.match(r"\S+\s+/data\s", l)]
+    if data and "fileencryption=" in data[0] and "keydirectory=" in data[0]:
+        ok("/data has fileencryption= and keydirectory= (metadata encryption)")
+    else:
+        fail("the /data line in recovery.fstab lacks fileencryption= or keydirectory=")
 
 
 def parse_fstab(path):
@@ -327,6 +389,7 @@ def main():
     check_vendorsetup(tree, args.device)
     mv = check_boardconfig(tree)
     check_fstab(tree)
+    check_crypto(tree, mv, args.device)
     check_modules(tree, mv)
     if args.device_info:
         check_device_info(tree, args.device_info)

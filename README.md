@@ -40,13 +40,14 @@ mka adbd recoveryimage
 
 | Tool | Runs on | Purpose |
 |------|---------|---------|
-| `tools/preflight.py <tree>` | PC / CI | Checks the tree's layout (the one used by the official a33x/a23xq trees), the OrangeFox guidelines (fstab rules, no UI offsets, Fox vars), that every module matches the prebuilt kernel, and whether the touch drivers can load from the ramdisk |
-| `tools/check-image.py <img> <tree>` | PC / CI | Checks a built image: stock header layout, SEANDROIDENFORCE, AVB footer, size, kernel/module match, touch modules present |
+| `tools/preflight.py <tree>` | PC / CI | Checks the tree's layout (the one used by the official a33x/a23xq trees), the OrangeFox guidelines (fstab rules, no UI offsets, Fox vars), that every module matches the prebuilt kernel, whether the touch drivers can load from the ramdisk, and, with decryption on, that the TEE files match `tee-files.txt` and the patch levels are the firmware's |
+| `tools/check-image.py <img> <tree>` | PC / CI | Checks a built image: stock header layout, os version and patch level, SEANDROIDENFORCE, AVB footer, size, kernel/module match, touch modules present, and the TEE files when decryption is on |
 | `tools/device-info.sh` | phone (root) | Reports the values the tree depends on: cutout/status bar, backlight, partitions and sizes, MicroSD/OTG sysfs paths, current vendor fstab. `preflight.py --device-info <report>` checks the tree against it |
 | `tools/pull-vendor-files.sh <dir> [--recovery]` | PC (adb) | Copies the touch modules, their dependencies, `modules.dep` and the touch firmware from a rooted phone; `--recovery` also dumps the stock recovery partition |
 | `tools/extract-prebuilts.py` | PC | Replaces kernel, DTB, DTBO and recovery modules from a stock recovery image |
 | `tools/tee-info.sh` | phone (root) | Reports what /data decryption depends on: the real and the reported Android version and patch levels, the patch level in the boot/recovery headers, the TEE (TEEGRIS), keymint and gatekeeper services and their init scripts, the trusted apps, and which lock screen protectors are in use. Read-only |
 | `tools/pull-tee-files.py <dir>` | PC (adb) | Copies the TEE stack from a rooted phone on stock firmware: the services above, every library they load (followed recursively), the trusted apps, vintf fragments and build.prop files, with a `MANIFEST.tsv`; writes `<dir>.zip` |
+| `tools/install-tee-files.py <dir or zip> --tree <tree>` | PC | Installs the TEE services, the gatekeeper module and every library they need from `pull-tee-files.py` output into the tree, writes `tee-files.txt` (firmware, patch levels, checksums) and sets `PLATFORM_SECURITY_PATCH` to the firmware's |
 
 ### Refreshing the prebuilts from newer firmware
 

@@ -47,7 +47,13 @@ header() {
 	fi
 	tmp=/data/local/tmp/tee-info-header.$$
 	dd if="$part" of="$tmp" bs=4096 count=1 2>/dev/null
-	if [ "$(dd if="$tmp" bs=8 count=1 2>/dev/null)" != "ANDROID!" ]; then
+	magic=$(dd if="$tmp" bs=8 count=1 2>/dev/null)
+	if [ "$magic" = "VNDRBOOT" ]; then
+		echo "$1: vendor boot header v$(u32 "$tmp" 8) (no os version)"
+		rm -f "$tmp"
+		return
+	fi
+	if [ "$magic" != "ANDROID!" ]; then
 		echo "$1: no boot image header"
 		rm -f "$tmp"
 		return
@@ -77,11 +83,15 @@ section "the same values as getprop reports them (root hiding may change these)"
 getprop | grep -iE 'security_patch|version\.release\]|version\.sdk\]|ro\.hardware\.|keystore|gatekeeper|keymint|keymaster|crypto|tzdaemon|tzts|teegris|weaver|hermes|verifiedbootstate|device_state|flash\.locked|warranty'
 
 section "boot state as the bootloader passed it to the kernel"
-for f in /proc/bootconfig /proc/cmdline; do
-	[ -r "$f" ] || continue
-	echo "--- $f"
-	tr ' ' '\n' < "$f" | grep -E 'verifiedbootstate|vbmeta\.device_state|flash\.locked|warranty_bit|bootloader=' | sed 's/^[[:space:]]*//'
-done
+KEYS='verifiedbootstate|vbmeta\.device_state|flash\.locked|warranty_bit|bootloader'
+if [ -r /proc/bootconfig ]; then
+	echo "--- /proc/bootconfig"
+	grep -E "$KEYS" /proc/bootconfig
+fi
+if [ -r /proc/cmdline ]; then
+	echo "--- /proc/cmdline"
+	tr ' ' '\n' < /proc/cmdline | grep -E "$KEYS"
+fi
 
 section "os version and patch level in the image headers"
 for p in boot init_boot recovery vendor_boot; do
@@ -128,6 +138,12 @@ grep -iE -A3 '<name>[^<]*(keymint|keymaster|gatekeeper|weaver|secureclock|shared
 section "trusted apps (/vendor/tee)"
 ls -lR /vendor/tee 2>/dev/null
 ls -ld /vendor/tee_compat /vendor/app/mcRegistry 2>/dev/null
+
+section "secure element behind weaver (names only)"
+ls -lZ /dev/k250a /dev/ssp 2>/dev/null
+echo "security.securehw.available=$(getprop security.securehw.available)"
+ls -l /vendor/etc/secnvm /vendor/firmware/secnvm 2>/dev/null
+echo "/data/vendor/gatekeeper: $(ls -a /data/vendor/gatekeeper 2>/dev/null | tr '\n' ' ')"
 
 section "TEE and keystore storage (names only)"
 for d in /mnt/vendor/efs /efs; do
