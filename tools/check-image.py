@@ -129,9 +129,11 @@ def main():
         missing = [w for w in wanted if w not in names]
         check(not missing, f"{len(wanted)} TEE files and scripts in the ramdisk",
               "missing from the ramdisk: " + ", ".join(missing[:6]))
-        impl = [n for n in names if n.endswith("android.hardware.gatekeeper@1.0-impl.so")]
-        check(bool(impl), f"gatekeeper impl at {impl[0] if impl else ''}",
-              "android.hardware.gatekeeper@1.0-impl.so missing from the ramdisk")
+        # HIDL passthrough only looks in {odm,vendor,system}/lib64/hw
+        impl = [n for n in names if n.endswith("/lib64/hw/android.hardware.gatekeeper@1.0-impl.so")]
+        check(bool(impl), f"gatekeeper implementation at {impl[0] if impl else ''}",
+              "android.hardware.gatekeeper@1.0-impl.so is not in a lib64/hw directory, "
+              "so the gatekeeper service cannot load it")
 
     print()
     print(f"{len(failures)} failure(s)")

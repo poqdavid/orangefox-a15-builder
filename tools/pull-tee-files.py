@@ -11,7 +11,8 @@ takes, so the tree can be set up from the real files instead of guesses:
   - every library the binaries load, followed recursively through /vendor,
     /odm and the VNDK apex (libraries from /system are copied but not
     followed, the recovery has its own)
-  - the gatekeeper/keystore HAL modules libhardware opens by name
+  - the gatekeeper/keystore HAL modules libhardware opens by name, and the
+    HIDL passthrough implementations the stock services load
   - the trusted apps in /vendor/tee
   - the matching vintf manifest fragments and the build.prop files
 
@@ -37,7 +38,10 @@ import foxtools  # noqa: E402
 SERVICE_RE = re.compile(r"tzdaemon|tzts|teegris|keymint|keymaster|gatekeeper|weaver|hermes", re.I)
 VINTF_RE = re.compile(r"keymint|keymaster|gatekeeper|weaver|secureclock|sharedsecret|rkp|"
                       r"remotelyprovision", re.I)
-HAL_MODULE_RE = re.compile(r"^(gatekeeper|keystore|keymaster)\.", re.I)
+# libhardware modules (gatekeeper.<platform>.so, ...) and the HIDL passthrough
+# implementations the stock services load from */hw (android.hardware.gatekeeper@1.0-impl.so)
+HAL_MODULE_RE = re.compile(r"^(gatekeeper|keystore|keymaster)\.|"
+                           r"^android\.hardware\.(gatekeeper|keymaster|weaver)@[0-9.]+-impl\.so$", re.I)
 # provided by the recovery's own bionic, never copied
 BIONIC = {"libc.so", "libm.so", "libdl.so", "libdl_android.so", "ld-android.so"}
 RC_GLOBS = "/vendor/etc/init/*.rc /vendor/etc/init/hw/*.rc /odm/etc/init/*.rc"
@@ -235,6 +239,7 @@ def main():
         col.save(path, "binary", needed_by=started_by)
 
     # 2. HAL modules libhardware loads by name (gatekeeper.<x>.so, keystore.<x>.so)
+    #    and HIDL passthrough implementations (android.hardware.gatekeeper@1.0-impl.so)
     for path in phone.files_in(HAL_DIRS):
         if HAL_MODULE_RE.search(os.path.basename(path)):
             col.save(path, "hal")

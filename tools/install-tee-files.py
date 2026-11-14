@@ -7,7 +7,8 @@ Takes what pull-tee-files.py copied from a phone on stock firmware and puts
 into the tree's recovery/root/vendor what recovery needs to start TEEGRIS
 and the keymint, fkeymaster, gatekeeper and weaver services:
 
-  - the service binaries and the gatekeeper HAL module
+  - the service binaries, including the stock gatekeeper service, its HIDL
+    passthrough implementation and the gatekeeper module
   - every library they load from /vendor, and the VNDK libraries the
     recovery does not have itself
 
@@ -40,9 +41,15 @@ SERVICES = [
     "/vendor/bin/hw/android.hardware.security.keymint-service",
     "/vendor/bin/vendor.samsung.hardware.security.fkeymaster-service",
     "/vendor/bin/hermesd",
+    "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service",
 ]
-# loaded by the gatekeeper service (built from AOSP) through libhardware
-HAL_MODULE = "/vendor/lib64/hw/gatekeeper.{platform}.so"
+# loaded at run time rather than through DT_NEEDED: the stock gatekeeper
+# service opens its HIDL passthrough implementation from /vendor/lib64/hw,
+# which opens the gatekeeper module through libhardware
+HAL_MODULES = [
+    "/vendor/lib64/hw/android.hardware.gatekeeper@1.0-impl.so",
+    "/vendor/lib64/hw/gatekeeper.{platform}.so",
+]
 
 BIONIC = {"libc.so", "libm.so", "libdl.so", "libdl_android.so", "ld-android.so"}
 # in the recovery's /system/lib64 when TW_INCLUDE_CRYPTO is on (TWRP relinks
@@ -203,10 +210,11 @@ def main():
                 foxtools.die(f"{name} not found in the pulled build.prop files")
         print(f"firmware: {firmware}, Android {android}, patch {spl}, vendor patch {vendor_spl}")
 
-        roots = SERVICES + [HAL_MODULE.format(platform=platform)]
+        roots = SERVICES + [m.format(platform=platform) for m in HAL_MODULES]
         absent = [r for r in roots if not pulled.exists(r)]
         if absent:
-            foxtools.die("not in the pulled files: " + ", ".join(absent))
+            foxtools.die("not in the pulled files: " + ", ".join(absent)
+                         + "\npull them again with the current pull-tee-files.py")
         chosen = plan(pulled, roots)
 
         # remove what an earlier run installed

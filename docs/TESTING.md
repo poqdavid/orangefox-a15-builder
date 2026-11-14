@@ -124,10 +124,19 @@ for each):
       `tee-files.txt`): still decrypts, `/tmp/tee.log` shows the new patch
       levels, and Android still accepts the PIN afterwards
 
-If decryption fails, `/tmp/tee.log` and the lines tagged `tee:` in dmesg
-show whether the TEE was started; `logcat -d | grep -iE
-"keymint|tzdaemon|gatekeeper|weaver|hermes|vold|keystore2"` shows where it
-stopped.
+If decryption fails, try the PIN once more, then collect everything over
+adb while still in recovery:
+
+```bash
+adb shell logcat -d > logcat.txt
+adb shell dmesg > dmesg.txt
+adb pull /tmp/recovery.log
+adb pull /tmp/tee.log
+```
+
+`/tmp/tee.log` (and the lines tagged `tee:` in dmesg) shows whether the
+TEE was started; logcat (vold, keystore2, keymint, gatekeeper, hermesd)
+shows where decryption stopped.
 
 ## Known limitations to state in every release
 
