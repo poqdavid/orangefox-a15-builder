@@ -314,3 +314,76 @@ def prebuilt_paths(mv):
 def tw_vendor_modules(boardconfig):
     raw = read_make_vars(boardconfig).get("TW_LOAD_VENDOR_MODULES", "")
     return raw.strip('"').split()
+
+
+# --- ELF -------------------------------------------------------------------
+
+ELF_MAGIC = b"\x7fELF"
+
+
+def elf_info(data):
+    """(bits, needed, soname) of an ELF file, or None if it is not one.
+
+    Reads DT_NEEDED and DT_SONAME from the dynamic section; enough to work
+    out which shared libraries a vendor binary pulls in.
+    """
+    if data[:4] != ELF_MAGIC or len(data) < 64:
+        return None
+    bits = {1: 32, 2: 64}.get(data[4])
+    endian = {1: "<", 2: ">"}.get(data[5])
+    if not bits or not endian:
+        return None
+    if bits == 64:
+        phoff, = struct.unpack_from(endian + "Q", data, 0x20)
+        phentsize, phnum = struct.unpack_from(endian + "HH", data, 0x36)
+        ph_fmt, dyn_fmt = endian + "IIQQQQQQ", endian + "qQ"
+    else:
+        phoff, = struct.unpack_from(endian + "I", data, 0x1C)
+        phentsize, phnum = struct.unpack_from(endian + "HH", data, 0x2A)
+        ph_fmt, dyn_fmt = endian + "IIIIIIII", endian + "iI"
+
+    loads, dynamic = [], None
+    for i in range(phnum):
+        off = phoff + i * phentsize
+        if off + struct.calcsize(ph_fmt) > len(data):
+            break
+        f = struct.unpack_from(ph_fmt, data, off)
+        if bits == 64:   # type, flags, offset, vaddr, paddr, filesz, memsz, align
+            p_type, p_offset, p_vaddr, p_filesz = f[0], f[2], f[3], f[5]
+        else:            # type, offset, vaddr, paddr, filesz, memsz, flags, align
+            p_type, p_offset, p_vaddr, p_filesz = f[0], f[1], f[2], f[4]
+        if p_type == 1:
+            loads.append((p_vaddr, p_offset, p_filesz))
+        elif p_type == 2:
+            dynamic = (p_offset, p_filesz)
+    if dynamic is None:
+        return bits, [], None
+
+    def file_offset(vaddr):
+        for v, o, size in loads:
+            if v <= vaddr < v + size:
+                return o + vaddr - v
+        return None
+
+    needed, soname_idx, strtab, step = [], None, None, struct.calcsize(dyn_fmt)
+    off, end = dynamic[0], min(dynamic[0] + dynamic[1], len(data))
+    while off + step <= end:
+        tag, val = struct.unpack_from(dyn_fmt, data, off)
+        off += step
+        if tag == 0:
+            break
+        if tag == 1:
+            needed.append(val)
+        elif tag == 5:
+            strtab = file_offset(val)
+        elif tag == 14:
+            soname_idx = val
+    if strtab is None:
+        return bits, [], None
+
+    def string(idx):
+        start = strtab + idx
+        stop = data.find(b"\x00", start)
+        return data[start:stop if stop >= 0 else None].decode("utf-8", "replace")
+
+    return bits, [string(i) for i in needed], (string(soname_idx) if soname_idx is not None else None)

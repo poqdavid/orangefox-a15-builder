@@ -45,6 +45,8 @@ mka adbd recoveryimage
 | `tools/device-info.sh` | phone (root) | Reports the values the tree depends on: cutout/status bar, backlight, partitions and sizes, MicroSD/OTG sysfs paths, current vendor fstab. `preflight.py --device-info <report>` checks the tree against it |
 | `tools/pull-vendor-files.sh <dir> [--recovery]` | PC (adb) | Copies the touch modules, their dependencies, `modules.dep` and the touch firmware from a rooted phone; `--recovery` also dumps the stock recovery partition |
 | `tools/extract-prebuilts.py` | PC | Replaces kernel, DTB, DTBO and recovery modules from a stock recovery image |
+| `tools/tee-info.sh` | phone (root) | Reports what /data decryption depends on: the real and the reported Android version and patch levels, the patch level in the boot/recovery headers, the TEE (TEEGRIS), keymint and gatekeeper services and their init scripts, the trusted apps, and which lock screen protectors are in use. Read-only |
+| `tools/pull-tee-files.py <dir>` | PC (adb) | Copies the TEE stack from a rooted phone on stock firmware: the services above, every library they load (followed recursively), the trusted apps, vintf fragments and build.prop files, with a `MANIFEST.tsv`; writes `<dir>.zip` |
 
 ### Refreshing the prebuilts from newer firmware
 
