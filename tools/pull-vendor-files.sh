@@ -12,7 +12,9 @@
 # (about 80 MB). Only useful while the phone still has the STOCK recovery;
 # extract-prebuilts.py rejects a dump of a custom one.
 #
-set -euo pipefail
+set -Eeuo pipefail
+# say where the script stopped instead of exiting silently
+trap 'echo "stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 out=${1:?usage: pull-vendor-files.sh <output dir> [--recovery]}
 dump_recovery=${2:-}
@@ -75,14 +77,23 @@ for name in "${unique[@]}"; do
 	pull "$moddir/$name" "$name"
 done
 
+# find exits non-zero when one of the directories does not exist (this
+# phone has no /vendor_dlkm/firmware), and adb passes that status on
 for f in "${firmware[@]}"; do
-	path=$(root "find /vendor/firmware /vendor_dlkm/firmware -name $f 2>/dev/null" | head -n 1)
+	path=$(root "find /vendor/firmware /vendor_dlkm/firmware -name $f 2>/dev/null; true" | head -n 1) || true
 	if [ -n "$path" ]; then pull "$path" "$f"; else echo "missing:  $f" >&2; fi
 done
 
 if [ "$dump_recovery" = "--recovery" ]; then
+	# exec-out does not pass on the exit status, so check what arrived
 	adb exec-out "su -c 'dd if=/dev/block/by-name/recovery bs=1048576 2>/dev/null'" > "$out/recovery.img"
-	echo "pulled:   recovery partition ($(wc -c < "$out/recovery.img") bytes)"
+	size=$(wc -c < "$out/recovery.img")
+	if [ "$(head -c 8 "$out/recovery.img")" != "ANDROID!" ]; then
+		echo "failed to read the recovery partition (got $size bytes, not a boot image)" >&2
+		rm -f "$out/recovery.img"
+		exit 1
+	fi
+	echo "pulled:   recovery partition ($size bytes)"
 fi
 
 echo "done: ${#unique[@]} modules in $out"
