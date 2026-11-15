@@ -318,6 +318,17 @@ def tw_vendor_modules(boardconfig):
     return raw.strip('"').split()
 
 
+# vendor_dlkm modules on TW_LOAD_VENDOR_MODULES that only add a feature; the
+# others are the touch drivers. cpu_temp.sh loads soc_temp_lvts.ko from the
+# ramdisk before OrangeFox starts, so it has no fallback to the ROM.
+OPTIONAL_VENDOR_MODULES = {"soc_temp_lvts.ko": "CPU temperature"}
+
+
+def vendor_module_role(module):
+    """What a TW_LOAD_VENDOR_MODULES entry is for, for messages."""
+    return OPTIONAL_VENDOR_MODULES.get(module, "touch")
+
+
 # --- ELF -------------------------------------------------------------------
 
 ELF_MAGIC = b"\x7fELF"

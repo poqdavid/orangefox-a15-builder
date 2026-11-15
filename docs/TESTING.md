@@ -77,6 +77,12 @@ Device:
       ramdisk, see below)
 - [ ] Brightness slider covers the full range without jumping to HBM
 - [ ] Battery percentage and charging indicator
+- [ ] CPU temperature in the status bar, close to what Android shows for
+      `soc_max`; `adb shell "ls -l /tmp/cpu_temp"` points at a
+      thermal zone and `adb shell "dmesg | grep cpu_temp"` names it. Needs
+      `soc_temp_lvts.ko` in the ramdisk (`pull-vendor-files.sh` and
+      `extract-prebuilts.py --vendor-files`); without it the temperature is
+      hidden
 - [ ] Vibration (sec_vibrator, `/sys/class/timed_output/vibrator`)
 - [ ] Status bar clears the cutout; clock left and right; rounded corners
 
@@ -153,4 +159,5 @@ shows where decryption stopped. `keys.txt` must have a `keyring` named
 - Settings, themes and the recovery password are stored in the cache
   partition (`/cache/Fox`), so wiping cache resets them.
 - No flashlight (the flash LED modules aren't in the recovery ramdisk).
-- No CPU temperature (thermal modules aren't loaded in recovery).
+- No CPU temperature unless `soc_temp_lvts.ko` was added to the ramdisk
+  from the same firmware as the kernel.

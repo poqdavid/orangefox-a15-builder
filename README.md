@@ -43,7 +43,7 @@ mka adbd recoveryimage
 | `tools/preflight.py <tree>` | PC / CI | Checks the tree's layout (the one used by the official a33x/a23xq trees), the OrangeFox guidelines (fstab rules, no UI offsets, Fox vars), that every module matches the prebuilt kernel, whether the touch drivers can load from the ramdisk, and, with decryption on, that the TEE files match `tee-files.txt` and the patch levels are the firmware's |
 | `tools/check-image.py <img> <tree>` | PC / CI | Checks a built image: stock header layout, os version and patch level, SEANDROIDENFORCE, AVB footer, size, kernel/module match, touch modules present, and the TEE files when decryption is on |
 | `tools/device-info.sh` | phone (root) | Reports the values the tree depends on: cutout/status bar, backlight, partitions and sizes, MicroSD/OTG sysfs paths, current vendor fstab. `preflight.py --device-info <report>` checks the tree against it |
-| `tools/pull-vendor-files.sh <dir> [--recovery]` | PC (adb) | Copies the touch modules, their dependencies, `modules.dep` and the touch firmware from a rooted phone; `--recovery` also dumps the stock recovery partition |
+| `tools/pull-vendor-files.sh <dir> [--recovery]` | PC (adb) | Copies the touch modules, the SoC temperature sensor module, their dependencies, `modules.dep` and the touch firmware from a rooted phone; `--recovery` also dumps the stock recovery partition |
 | `tools/extract-prebuilts.py` | PC | Replaces kernel, DTB, DTBO and recovery modules from a stock recovery image |
 | `tools/tee-info.sh` | phone (root) | Reports what /data decryption depends on: the real and the reported Android version and patch levels, the patch level in the boot/recovery headers, the TEE (TEEGRIS), keymint and gatekeeper services and their init scripts, the trusted apps, and which lock screen protectors are in use. Read-only |
 | `tools/pull-tee-files.py <dir>` | PC (adb) | Copies the TEE stack from a rooted phone on stock firmware: the services above, every library they load (followed recursively), the trusted apps, vintf fragments and build.prop files, with a `MANIFEST.tsv`; writes `<dir>.zip` |
@@ -52,9 +52,10 @@ mka adbd recoveryimage
 ### Refreshing the prebuilts from newer firmware
 
 The tree's kernel, DTB, DTBO and modules all come from one stock firmware
-(named in the tree's README). The touch drivers are not part of the stock
-recovery: they and `tuihw-inf.ko`, which they need, are taken from
-`vendor_dlkm`. To move to a newer firmware, use a rooted phone running that
+(named in the tree's README). The touch drivers and the SoC temperature
+sensor driver (`soc_temp_lvts.ko`, for the CPU temperature) are not part of
+the stock recovery: they and `tuihw-inf.ko`, which the touch drivers need,
+are taken from `vendor_dlkm`. To move to a newer firmware, use a rooted phone running that
 stock firmware.
 
 ```bash
@@ -68,10 +69,12 @@ tools/preflight.py ~/fox_12.1/device/samsung/a15
 If the phone already has a custom recovery, pass the AP file instead:
 `--recovery AP_A155F...tar.md5`.
 
-`pull-vendor-files.sh` copies the touch drivers, every module they depend
-on and `modules.dep`. `extract-prebuilts.py` installs the ones the stock
-recovery lacks into the ramdisk's `/lib/modules` with their `modules.dep`
-entries, so touch no longer depends on the installed ROM. It refuses to
+`pull-vendor-files.sh` copies the touch drivers, `soc_temp_lvts.ko`, every
+module they depend on and `modules.dep`. `extract-prebuilts.py` installs the
+ones the stock recovery lacks into the ramdisk's `/lib/modules` with their
+`modules.dep` entries, so touch no longer depends on the installed ROM and
+the tree's `cpu_temp.sh` can load the temperature sensor before OrangeFox
+starts. A firmware without `soc_temp_lvts.ko` is skipped with a warning. It refuses to
 write a tree that mixes modules from different kernel builds, and prints
 any difference between the stock image layout and `BoardConfig.mk`. Use
 `--dry-run` to only compare.

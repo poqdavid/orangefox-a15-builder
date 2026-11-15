@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Copy the touchscreen modules, everything they depend on, modules.dep and
-# the touch firmware from a rooted phone, for
+# Copy the touchscreen modules, the SoC temperature sensor module
+# (soc_temp_lvts.ko, for the CPU temperature), everything they depend on,
+# modules.dep and the touch firmware from a rooted phone, for
 # extract-prebuilts.py --vendor-files. The phone must run the SAME stock
 # firmware as the recovery image you extract the kernel from.
 #
@@ -16,6 +17,8 @@ set -euo pipefail
 out=${1:?usage: pull-vendor-files.sh <output dir> [--recovery]}
 dump_recovery=${2:-}
 modules=(zt7650m_ts.ko focaltech_ts_ft3418.ko)
+# skipped with a note if the firmware does not have them
+optional=(soc_temp_lvts.ko)
 firmware=(zt7650m_a15.bin ft3418_a15.bin)
 
 command -v adb >/dev/null || { echo "adb not found" >&2; exit 1; }
@@ -53,9 +56,15 @@ pull "$moddir/modules.dep" modules.dep
 
 # a modules.dep line lists the module followed by all of its dependencies
 needed=()
-for m in "${modules[@]}"; do
+for m in "${modules[@]}" "${optional[@]}"; do
 	line=$(grep -E "(^|/)$m:" "$out/modules.dep" || true)
-	[ -n "$line" ] || { echo "$m is not listed in modules.dep" >&2; exit 1; }
+	if [ -z "$line" ]; then
+		case " ${optional[*]} " in
+		*" $m "*) echo "skipped:  $m is not listed in modules.dep" >&2; continue ;;
+		esac
+		echo "$m is not listed in modules.dep" >&2
+		exit 1
+	fi
 	for path in ${line//:/ }; do
 		needed+=("$(basename "$path")")
 	done

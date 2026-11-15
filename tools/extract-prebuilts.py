@@ -11,12 +11,13 @@ Replaces, all from the same stock image:
   recovery/root/lib/modules/* (the stock recovery module set and lists)
 
 --vendor-files is the directory written by pull-vendor-files.sh on a phone
-running the SAME firmware: the touchscreen modules from
-TW_LOAD_VENDOR_MODULES, every module they depend on, vendor_dlkm's
-modules.dep and the touch firmware. With it, the touch drivers and their
-missing dependencies are installed into the ramdisk's /lib/modules with
-modules.dep entries, so the recovery can load them without a ROM installed.
-Without it, the tree keeps the touch modules it has.
+running the SAME firmware: the modules on TW_LOAD_VENDOR_MODULES (the touch
+drivers and soc_temp_lvts.ko for the CPU temperature), every module they
+depend on, vendor_dlkm's modules.dep and the touch firmware. With it, they
+and their missing dependencies are installed into the ramdisk's
+/lib/modules with modules.dep entries, so the recovery can load them
+without a ROM installed. An optional module the phone does not have is
+skipped. Without it, the tree keeps the vendor modules it has.
 """
 
 import argparse
@@ -129,6 +130,10 @@ def plan_vendor_modules(vendor_dir, wanted, stock_names, stock_deps, release):
     dep_lines = []
     for mod in wanted:
         if mod not in vdeps:
+            if mod in foxtools.OPTIONAL_VENDOR_MODULES:
+                print(f"warning: {mod} is not in the phone's modules.dep; no "
+                      f"{foxtools.vendor_module_role(mod)}")
+                continue
             foxtools.die(f"{mod} is not in the phone's modules.dep")
         chain(mod)
     for name in to_copy:
@@ -199,7 +204,7 @@ def main():
         to_copy, dep_lines = plan_vendor_modules(args.vendor_files, wanted, set(kos), stock_deps, release)
         print(f"\nvendor modules added to /lib/modules: {', '.join(to_copy) or 'none'}")
     else:
-        # keep the tree's touch modules, wherever they are, if they still match
+        # keep the tree's vendor modules, wherever they are, if they still match
         stale = []
         for d in (libmod, vend_dir):
             for m in wanted:
@@ -211,14 +216,14 @@ def main():
                         with open(p, "rb") as f:
                             kept[m] = f.read()
         if stale:
-            print("\nwarning: the touch modules in the tree were built for another kernel:")
+            print("\nwarning: the vendor modules in the tree were built for another kernel:")
             for p in stale:
                 print(f"  {os.path.relpath(p, tree)}: {foxtools.module_vermagic(p)}")
             print("  pass --vendor-files with the output of pull-vendor-files.sh from the same firmware")
             if not args.dry_run:
                 foxtools.die("refusing to write a tree with mismatched modules")
         if kept:
-            print("\nwarning: touch modules in lib/modules are kept, but their modules.dep entries and\n"
+            print("\nwarning: vendor modules in lib/modules are kept, but their modules.dep entries and\n"
                   "         extra dependencies are not carried over without --vendor-files")
 
     if args.dry_run:

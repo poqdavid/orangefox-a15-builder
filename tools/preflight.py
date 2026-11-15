@@ -381,15 +381,34 @@ def check_modules(tree, mv):
     # Touch drivers: the recovery can only load them from the ramdisk when they
     # sit in /lib/modules with modules.dep entries and all dependencies, and
     # TW_LOAD_VENDOR_BOOT_MODULES is set. Otherwise it needs the ROM's vendor_dlkm.
+    # The optional ones (soc_temp_lvts.ko) only ever load from the ramdisk.
     boot_modules = mv.get("TW_LOAD_VENDOR_BOOT_MODULES") == "true"
     for ko in foxtools.tw_vendor_modules(os.path.join(tree, "BoardConfig.mk")):
         why = foxtools.ramdisk_loadable(libmod, ko)
-        if why is None and boot_modules:
+        role = foxtools.vendor_module_role(ko)
+        if ko in foxtools.OPTIONAL_VENDOR_MODULES:
+            if why is None:
+                ok(f"{ko} loads from the ramdisk ({role})")
+            else:
+                warn(f"{ko} cannot load from the ramdisk ({why}): no {role}; add it with "
+                     "pull-vendor-files.sh and extract-prebuilts.py --vendor-files")
+        elif why is None and boot_modules:
             ok(f"{ko} loads from the ramdisk")
         elif why is None:
             warn(f"{ko} is in the ramdisk but TW_LOAD_VENDOR_BOOT_MODULES is not set")
         else:
-            warn(f"{ko} cannot load from the ramdisk ({why}); touch needs the installed ROM's vendor_dlkm")
+            warn(f"{ko} cannot load from the ramdisk ({why}); {role} needs the installed ROM's vendor_dlkm")
+
+    # OrangeFox checks TW_CUSTOM_CPU_TEMP_PATH once, at startup, before it
+    # loads TW_LOAD_VENDOR_MODULES; cpu_temp.sh makes the link from init
+    temp_path = mv.get("TW_CUSTOM_CPU_TEMP_PATH", "").strip('"')
+    if mv.get("TW_NO_CPU_TEMP") == "true":
+        ok("CPU temperature off (TW_NO_CPU_TEMP)")
+    elif temp_path == "/tmp/cpu_temp":
+        if os.path.isfile(os.path.join(root, "system/bin/cpu_temp.sh")):
+            ok("CPU temperature from /tmp/cpu_temp, linked by cpu_temp.sh")
+        else:
+            fail("TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but recovery/root/system/bin/cpu_temp.sh is missing")
 
     kernel = mv.get("TARGET_PREBUILT_KERNEL", "")
     if not os.path.isfile(kernel):

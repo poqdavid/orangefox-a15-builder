@@ -120,10 +120,17 @@ def main():
     deps = foxtools.parse_modules_dep(dep_text)
     for ko in foxtools.tw_vendor_modules(os.path.join(args.tree, "BoardConfig.mk")):
         missing = [d for d in deps.get(ko, []) if f"lib/modules/{d}" not in names]
+        role = foxtools.vendor_module_role(ko)
         if f"lib/modules/{ko}" in names and ko in deps and not missing:
             print(f"  ok    {ko} loads from the ramdisk")
+        elif ko in foxtools.OPTIONAL_VENDOR_MODULES:
+            print(f"  note  {ko} is not loadable from the ramdisk: no {role}")
         else:
-            print(f"  note  {ko} is not loadable from the ramdisk; touch needs the ROM's vendor_dlkm")
+            print(f"  note  {ko} is not loadable from the ramdisk; {role} needs the ROM's vendor_dlkm")
+    if mv.get("TW_CUSTOM_CPU_TEMP_PATH", "").strip('"') == "/tmp/cpu_temp":
+        check("system/bin/cpu_temp.sh" in names and "cpu_temp.sh" in rc_text,
+              "cpu_temp.sh links /tmp/cpu_temp at boot",
+              "TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but cpu_temp.sh is missing or not run by init")
     for f in ("system/etc/recovery.fstab", "system/etc/twrp.flags", "lib/modules/modules.load.recovery"):
         check(f in names, f"{f} in ramdisk", f"{f} missing from the ramdisk")
 
