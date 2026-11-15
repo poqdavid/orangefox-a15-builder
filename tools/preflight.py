@@ -238,6 +238,13 @@ def check_crypto(tree, mv, device):
         ok("prepare_tee.sh is present")
     else:
         fail("recovery/root/system/bin/prepare_tee.sh is missing")
+    # vold also adds each fscrypt key to the "fscrypt" session keyring, which
+    # only init's install_keyring creates in recovery
+    if any(re.search(r"^\s*install_keyring\s*$", open(r, encoding="utf-8").read(), re.M) for r in rcs):
+        ok("init creates the fscrypt keyring (install_keyring)")
+    else:
+        fail("no init.recovery.*.rc runs install_keyring; vold cannot install the DE key "
+             "(\"Unable to find device keyring\")")
 
     props = foxtools.read_props(os.path.join(tree, "vendor.prop"))
     if props.get("ro.hardware.keystore") and "vendor.prop" in mv.get("TARGET_VENDOR_PROP", ""):

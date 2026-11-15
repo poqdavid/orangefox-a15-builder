@@ -132,11 +132,18 @@ adb shell logcat -d > logcat.txt
 adb shell dmesg > dmesg.txt
 adb pull /tmp/recovery.log
 adb pull /tmp/tee.log
+adb shell "cat /proc/keys" > keys.txt
 ```
+
+These work the same from Linux, the Windows command prompt and PowerShell.
+For anything longer, run `adb shell` first and type the command on the
+phone: single quotes do not group words on Windows.
 
 `/tmp/tee.log` (and the lines tagged `tee:` in dmesg) shows whether the
 TEE was started; logcat (vold, keystore2, keymint, gatekeeper, hermesd)
-shows where decryption stopped.
+shows where decryption stopped. `keys.txt` must have a `keyring` named
+`fscrypt` (init creates it with `install_keyring`); without it, vold logs
+"Unable to find device keyring" right after unwrapping the DE key.
 
 ## Known limitations to state in every release
 

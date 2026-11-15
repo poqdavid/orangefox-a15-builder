@@ -11,6 +11,7 @@ belong together.
 
 import argparse
 import os
+import re
 import struct
 import sys
 
@@ -97,9 +98,12 @@ def main():
     print(f"  info  ramdisk is {kind}, {len(ramdisk)} bytes uncompressed")
     names = set()
     boot_list = None
+    rc_text = ""
     bad = []
     for name, _mode, payload in foxtools.cpio_entries(ramdisk):
         names.add(name)
+        if "/" not in name and name.endswith(".rc"):
+            rc_text += payload.decode("utf-8", "replace") + "\n"
         if name == foxtools.TEE_BOOT_LIST[len("recovery/root/"):]:
             boot_list = foxtools.read_tee_boot_list(payload.decode("utf-8", "replace"))
         if name.endswith(".ko"):
@@ -131,6 +135,9 @@ def main():
         missing = [w for w in wanted if w not in names]
         check(not missing, f"{len(wanted)} TEE files and scripts in the ramdisk",
               "missing from the ramdisk: " + ", ".join(missing[:6]))
+        check(re.search(r"^\s*install_keyring\s*$", rc_text, re.M) is not None,
+              "init creates the fscrypt keyring (install_keyring)",
+              "no init script runs install_keyring; vold cannot install the DE key")
         check(boot_list is not None, f"tee-files.list: {len(boot_list or [])} files taken from the firmware at boot",
               "vendor/etc/tee-files.list is missing, so nothing is taken from the firmware at boot")
         boot = set(boot_list or [])
