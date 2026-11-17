@@ -82,11 +82,16 @@ def sha256(data):
 class Pulled:
     """The files pull-tee-files.py wrote, addressed by their phone paths."""
 
-    def __init__(self, root):
+    def __init__(self, root, vndk_version=None):
         self.root = root
         apex = os.path.join(root, "apex")
         self.vndk = sorted(d for d in (os.listdir(apex) if os.path.isdir(apex) else [])
                            if d.startswith("com.android.vndk.v") and "@" not in d)
+        # the vendor's linker namespace only sees the VNDK of its own version
+        # (an older pull may have taken libraries from other ones too)
+        own = f"com.android.vndk.v{vndk_version}"
+        if own in self.vndk:
+            self.vndk = [own]
 
     def path(self, phone_path):
         return os.path.join(self.root, *phone_path.lstrip("/").split("/"))
@@ -201,11 +206,16 @@ def main():
         root = os.path.join(src, "root")
         if not os.path.isdir(root):
             foxtools.die(f"{args.pulled}: no root/ directory; is this pull-tee-files.py output?")
-        pulled = Pulled(root)
-
-        system = foxtools.read_props(pulled.path("/system/build.prop"))
-        vendor = foxtools.read_props(pulled.path("/vendor/build.prop"))
+        system = foxtools.read_props(os.path.join(root, "system/build.prop"))
+        vendor = foxtools.read_props(os.path.join(root, "vendor/build.prop"))
+        pulled = Pulled(root, vendor.get("ro.vndk.version"))
         firmware = system.get("ro.build.version.incremental") or vendor.get("ro.vendor.build.version.incremental")
+        vendor_fw = vendor.get("ro.vendor.build.version.incremental")
+        # the patch levels and the VNDK libraries come from the system, and a
+        # custom ROM's would be written down as the firmware's
+        if vendor_fw and firmware != vendor_fw:
+            foxtools.die(f"the pulled system ({firmware}) is not the stock firmware of the vendor "
+                         f"({vendor_fw}); pull the files from a phone running stock firmware")
         android = system.get("ro.build.version.release")
         spl = system.get("ro.build.version.security_patch")
         vendor_spl = vendor.get("ro.vendor.build.security_patch")

@@ -209,10 +209,14 @@ def main():
         foxtools.die("no root shell: allow 'Shell' in Magisk/KernelSU and check `adb devices`")
 
     firmware = phone.sh("getprop ro.build.version.incremental").strip()
+    vendor_fw = phone.sh("getprop ro.vendor.build.version.incremental").strip()
     device = phone.sh("getprop ro.product.device").strip()
     print(f"device:   {device}\nfirmware: {firmware}")
     if device != "a15":
         print(f"warning: this is '{device}', not 'a15'", file=sys.stderr)
+    if vendor_fw and firmware != vendor_fw:
+        print(f"warning: the system ({firmware}) is not the vendor's stock firmware ({vendor_fw}); "
+              "install-tee-files.py needs a pull from stock firmware", file=sys.stderr)
 
     os.makedirs(args.out, exist_ok=True)
     col = Collector(phone, args.out)
@@ -247,6 +251,11 @@ def main():
     # 3. the libraries all of the above load
     vndk = sorted(phone.lines("ls -d /apex/com.android.vndk.v* 2>/dev/null"))
     vndk = [v for v in vndk if "@" not in v]   # skip the versioned duplicate mounts
+    # the vendor's linker namespace only sees the VNDK of its own version; a
+    # ROM with several would otherwise give older libraries, with another ABI
+    own = f"/apex/com.android.vndk.v{phone.sh('getprop ro.vndk.version').strip()}"
+    if own in vndk:
+        vndk = [own]
     print(f"vndk:     {', '.join(vndk) or 'none'}")
     col.follow(vndk)
 
