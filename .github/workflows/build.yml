@@ -11,6 +11,11 @@ on:
         description: Device tree branch, tag or commit
         required: true
         default: fox_12.1
+      firmware:
+        description: Firmware set (One UI generation) to build; all = every set in the tree
+        type: choice
+        options: [all, oneui7, oneui6]
+        default: all
       build_type:
         description: FOX_BUILD_TYPE (Alpha/Beta/Stable are for the official maintainer only)
         type: choice
@@ -34,9 +39,69 @@ env:
   DEVICE_PATH: device/samsung/a15
 
 jobs:
+  # Resolves the tree ref once, so every set builds the same commit, and
+  # lists the sets to build: each is a build of its own (see the tree's
+  # firmware/firmware.mk). Only commits and trees are fetched, not the
+  # prebuilts.
+  sets:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.tree.outputs.commit }}
+      sets: ${{ steps.tree.outputs.sets }}
+    steps:
+      - name: Resolve the tree and its firmware sets
+        id: tree
+        env:
+          TREE_URL: ${{ inputs.tree_url }}
+          TREE_REF: ${{ inputs.tree_ref }}
+          FIRMWARE: ${{ inputs.firmware }}
+        run: |
+          git clone --quiet --no-checkout --filter=blob:none "$TREE_URL" tree
+          cd tree
+          # a branch or tag is fetched by name; a (short) commit is already in the clone
+          if git fetch --quiet origin "$TREE_REF"; then
+            commit=$(git rev-parse FETCH_HEAD)
+          else
+            commit=$(git rev-parse --verify "$TREE_REF^{commit}")
+          fi
+          git log -1 --format='%H %s' "$commit"
+          mapfile -t have < <(git ls-tree -r --name-only "$commit" -- firmware |
+            sed -n 's|^firmware/\([a-z0-9_]*\)/firmware\.mk$|\1|p')
+          if [ "${#have[@]}" -eq 0 ]; then
+            # a tree from before the firmware sets: one build of its own prebuilts
+            if [ "$FIRMWARE" != all ]; then
+              echo "::error::$TREE_REF has no firmware sets; build it with firmware: all"
+              exit 1
+            fi
+            sets='[""]'
+          elif [ "$FIRMWARE" = all ]; then
+            sets=$(printf '%s\n' "${have[@]}" | jq -R . | jq -cs .)
+          elif printf '%s\n' "${have[@]}" | grep -qx -- "$FIRMWARE"; then
+            sets=$(jq -cn --arg s "$FIRMWARE" '[$s]')
+          else
+            echo "::error::$TREE_REF has no firmware set $FIRMWARE, only: ${have[*]}"
+            exit 1
+          fi
+          echo "sets: $sets"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "sets=$sets" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: sets
+    name: build (${{ matrix.firmware || 'tree' }})
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    strategy:
+      # one set failing should not cancel the others
+      fail-fast: false
+      matrix:
+        firmware: ${{ fromJSON(needs.sets.outputs.sets) }}
+    env:
+      # not FIRMWARE: the environment reaches every makefile of the build
+      A15_SET: ${{ matrix.firmware }}
+      TREE_COMMIT: ${{ needs.sets.outputs.commit }}
+    outputs:
+      release_name: ${{ steps.package.outputs.release_name }}
     steps:
       - name: Check out builder
         uses: actions/checkout@v4
@@ -94,17 +159,16 @@ jobs:
         run: |
           git clone --no-checkout "$TREE_URL" "fox/$DEVICE_PATH"
           cd "fox/$DEVICE_PATH"
-          # a branch or tag is fetched by name; a (short) commit is already in the clone
-          if git fetch origin "$TREE_REF"; then
-            git checkout --detach FETCH_HEAD
-          else
-            git checkout --detach "$TREE_REF"
-          fi
-          echo "TREE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          # the ref may not be a branch the clone has; the commit is the one
+          # the sets job resolved, even if the branch has moved on since
+          git fetch --quiet origin "$TREE_REF" || true
+          git checkout --detach "$TREE_COMMIT"
           git log -1 --format='%H %s'
 
       - name: Preflight checks
-        run: python3 builder/tools/preflight.py "fox/$DEVICE_PATH" --device "$DEVICE"
+        run: |
+          python3 builder/tools/preflight.py "fox/$DEVICE_PATH" --device "$DEVICE" \
+            ${A15_SET:+--firmware "$A15_SET"}
 
       - name: Build
         env:
@@ -113,6 +177,9 @@ jobs:
         run: |
           cd fox
           export FOX_BUILD_DEVICE="$DEVICE"
+          # read by the tree's firmware/firmware.mk; a tree from before the
+          # firmware sets builds its own prebuilts
+          if [ -n "$A15_SET" ]; then export A15_FIRMWARE="$A15_SET"; fi
           if [ "$BUILD_TYPE" != "Unofficial" ]; then export FOX_BUILD_TYPE="$BUILD_TYPE"; fi
           if [ -n "$PATCH_VERSION" ]; then export FOX_MAINTAINER_PATCH_VERSION="$PATCH_VERSION"; fi
           set +eu
@@ -122,6 +189,7 @@ jobs:
           mka adbd recoveryimage 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
       - name: Package
+        id: package
         env:
           TREE_URL: ${{ inputs.tree_url }}
           BUILD_TYPE: ${{ inputs.build_type }}
@@ -133,16 +201,28 @@ jobs:
             echo "OrangeFox image or zip missing"; ls -la "$out"; exit 1
           fi
           echo "IMG=$img" >> "$GITHUB_ENV"
-          name=$(basename "$img" .img)
+          release_name=$(basename "$img" .img)
+          # the set goes into the file names: each build only works on its
+          # own One UI generation's bootloader
+          name=$release_name${A15_SET:+-$A15_SET}
           mkdir -p dist
-          cp "$img" "$zip" dist/
+          cp "$img" "dist/$name.img"
+          cp "$zip" "dist/$name.zip"
           # Odin wants recovery.img inside a ustar archive
           cp "$img" "$RUNNER_TEMP/recovery.img"
           tar -H ustar -C "$RUNNER_TEMP" -cf "dist/$name-odin.tar" recovery.img
           (cd dist && sha256sum -- * > SHA256SUMS)
+          if [ -n "$A15_SET" ]; then
+            mk="fox/$DEVICE_PATH/firmware/$A15_SET/firmware.mk"
+            fw_build=$(sed -n 's/^A15_FIRMWARE_BUILD := //p' "$mk")
+            fw_os=$(sed -n 's/^A15_FIRMWARE_OS := //p' "$mk")
+          fi
           {
             echo "## $name"
             echo
+            if [ -n "$A15_SET" ]; then
+              echo "- Firmware set: $A15_SET, from $fw_build, for bootloaders with OS letter $fw_os"
+            fi
             echo "- Device tree: $TREE_URL @ \`$TREE_COMMIT\`"
             echo "- Manifest: fox_$FOX_BRANCH"
             echo "- Build type: $BUILD_TYPE"
@@ -152,12 +232,15 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY" > dist/BUILD_INFO.md
           echo "BUILD_NAME=$name" >> "$GITHUB_ENV"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
 
       - name: Check image
         id: check
         continue-on-error: true
         shell: bash
-        run: python3 builder/tools/check-image.py "$IMG" "fox/$DEVICE_PATH" | tee dist/CHECK.txt
+        run: |
+          python3 builder/tools/check-image.py "$IMG" "fox/$DEVICE_PATH" \
+            ${A15_SET:+--firmware "$A15_SET"} | tee dist/CHECK.txt
 
       - name: Upload build
         uses: actions/upload-artifact@v4
@@ -170,7 +253,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
+          name: build-log${{ matrix.firmware && format('-{0}', matrix.firmware) || '' }}
           path: build.log
           if-no-files-found: ignore
 
@@ -180,16 +263,39 @@ jobs:
           echo "check-image.py reported problems, see CHECK.txt in the artifact"
           exit 1
 
+  # One draft release with every set, only if all of them built and passed
+  # check-image.py
+  release:
+    needs: build
+    if: inputs.draft_release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: OrangeFox-*
+          path: builds
+
+      - name: Collect the files
+        run: |
+          mkdir release
+          for d in builds/*/; do
+            cp "$d"*.img "$d"*.zip "$d"*.tar release/
+            cat "$d/BUILD_INFO.md" >> release/BUILD_INFO.md
+            echo >> release/BUILD_INFO.md
+          done
+          (cd release && sha256sum -- *.img *.zip *.tar > SHA256SUMS)
+          ls -l release
+
       - name: Draft release
-        if: inputs.draft_release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          tag_name: ${{ env.BUILD_NAME }}
-          name: ${{ env.BUILD_NAME }}
-          body_path: dist/BUILD_INFO.md
+          tag_name: ${{ needs.build.outputs.release_name }}
+          name: ${{ needs.build.outputs.release_name }}
+          body_path: release/BUILD_INFO.md
           files: |
-            dist/*.img
-            dist/*.zip
-            dist/*.tar
-            dist/SHA256SUMS
+            release/*.img
+            release/*.zip
+            release/*.tar
+            release/SHA256SUMS

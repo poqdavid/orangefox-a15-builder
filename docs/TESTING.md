@@ -64,8 +64,14 @@ Advanced:
 
 ROMs (each Android version the device has):
 
-- [ ] Stock One UI 6 (Android 14), One UI 7 (Android 15), One UI 8/8.5
-      (Android 16): boot after flashing through Odin, recovery still boots
+- [ ] Stock One UI 6 (Android 14) with the `oneui6` build, One UI 7
+      (Android 15) with the `oneui7` build: boot after flashing through
+      Odin, recovery still boots. One UI 8/8.5 (Android 16) has no
+      firmware set yet; check which build, if any, gets touch there
+- [ ] Each build on the other generation's bootloader: `/tmp/recovery.log`
+      warns that the build is for another bootloader
+      (`adb shell "grep OrangeFox: /tmp/recovery.log"`), and on the right one
+      it names the set and the bootloader
 - [ ] A custom ROM or GSI flashed from the recovery
 
 Device:
@@ -161,3 +167,7 @@ shows where decryption stopped. `keys.txt` must have a `keyring` named
 - No flashlight (the flash LED modules aren't in the recovery ramdisk).
 - No CPU temperature unless `soc_temp_lvts.ko` was added to the ramdisk
   from the same firmware as the kernel.
+- Each build is for one One UI generation: `oneui7` for bootloaders with
+  `C` 4th from the end of their version (A155FXXU7CYK1), `oneui6` for `B`
+  (A155MUBS6BYE1). On the other generation's bootloader, touch does not
+  work.

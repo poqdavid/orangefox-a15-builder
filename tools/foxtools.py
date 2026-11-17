@@ -265,25 +265,25 @@ def cpio_entries(data):
 _MAKE_REF = re.compile(r"\$\((\w+)\)")
 
 
-def read_make_vars(path, tree=None):
-    """Small reader for 'VAR := value' / 'VAR += value' lines in a makefile.
-
-    $(VAR) references to variables of the same file are expanded, and
-    DEVICE_PATH/LOCAL_PATH become the tree directory, so prebuilt paths can be
-    opened directly. Conditionals are not evaluated.
-    """
-    tree = tree or os.path.dirname(os.path.abspath(path))
-    raw = {}
+def _read_raw_vars(path, raw=None):
+    """'VAR := value' / 'VAR += value' / 'VAR ?= value' lines, unexpanded."""
+    raw = {} if raw is None else raw
     with open(path, encoding="utf-8") as f:
         # join lines continued with a trailing backslash
         lines = re.sub(r"\\[ \t]*\n", " ", f.read()).splitlines()
-        for line in lines:
-            m = re.match(r"^\s*([A-Za-z0-9_]+)\s*(\+=|:=|=)\s*(.*?)\s*$", line)
-            if not m or line.lstrip().startswith("#"):
-                continue
-            name, op, value = m.groups()
-            raw[name] = (raw.get(name, "") + " " + value).strip() if op == "+=" else value
+    for line in lines:
+        m = re.match(r"^\s*([A-Za-z0-9_]+)\s*(\+=|:=|\?=|=)\s*(.*?)\s*$", line)
+        if not m or line.lstrip().startswith("#"):
+            continue
+        name, op, value = m.groups()
+        if op == "+=":
+            raw[name] = (raw.get(name, "") + " " + value).strip()
+        elif op != "?=" or name not in raw:
+            raw[name] = value
+    return raw
 
+
+def _expand_vars(raw, tree):
     def expand(value, depth=0):
         def repl(m):
             name = m.group(1)
@@ -295,6 +295,101 @@ def read_make_vars(path, tree=None):
         return _MAKE_REF.sub(repl, value)
 
     return {k: expand(v) for k, v in raw.items()}
+
+
+def read_make_vars(path, tree=None):
+    """Small reader for 'VAR := value' / 'VAR += value' lines in a makefile.
+
+    $(VAR) references to variables of the same file are expanded, and
+    DEVICE_PATH/LOCAL_PATH become the tree directory, so prebuilt paths can be
+    opened directly. Conditionals and includes are not evaluated; use
+    board_vars() for BoardConfig.mk.
+    """
+    tree = tree or os.path.dirname(os.path.abspath(path))
+    return _expand_vars(_read_raw_vars(path), tree)
+
+
+# Firmware sets: the tree keeps the kernel, DTB, DTBO, recovery modules and touch firmware of
+# each supported firmware generation in firmware/<name>/, with its values in
+# firmware/<name>/firmware.mk; firmware/firmware.mk picks one with
+# A15_FIRMWARE. Trees from before that have them in prebuilt/ and
+# recovery/root instead ("no sets" below).
+
+FIRMWARE_DIR = "firmware"
+FIRMWARE_MK = "firmware.mk"
+FIRMWARE_NAME_RE = re.compile(r"^[a-z0-9_]+$")
+# what a set's firmware.mk must define
+FIRMWARE_VARS = ("A15_FIRMWARE_BUILD", "A15_BOARD_NAME", "A15_FIRMWARE_OS")
+
+
+def firmware_sets(tree):
+    """Names of the tree's firmware sets, [] for a tree without them."""
+    d = os.path.join(tree, FIRMWARE_DIR)
+    if not os.path.isdir(d):
+        return []
+    return sorted(n for n in os.listdir(d) if os.path.isfile(os.path.join(d, n, FIRMWARE_MK)))
+
+
+def default_firmware(tree):
+    """The set firmware/firmware.mk builds when A15_FIRMWARE is not set."""
+    path = os.path.join(tree, FIRMWARE_DIR, FIRMWARE_MK)
+    if not os.path.isfile(path):
+        return None
+    return _read_raw_vars(path).get("A15_FIRMWARE") or None
+
+
+def pick_firmware(tree, name=None):
+    """The set to work on: name, else $A15_FIRMWARE, else the tree's default.
+
+    None for a tree without sets. Stops on a set the tree does not have.
+    """
+    sets = firmware_sets(tree)
+    if not sets:
+        if name:
+            die(f"{tree} has no firmware sets (no {FIRMWARE_DIR}/<name>/{FIRMWARE_MK})")
+        return None
+    name = name or os.environ.get("A15_FIRMWARE") or default_firmware(tree)
+    if name not in sets:
+        die(f"no firmware set '{name}' in {tree}; it has: {', '.join(sets)}")
+    return name
+
+
+def firmware_root(tree, name):
+    """The set's recovery/root (lib/modules, vendor/firmware), or the tree's
+    own recovery/root for a tree without sets."""
+    if name is None:
+        return os.path.join(tree, "recovery/root")
+    return os.path.join(tree, FIRMWARE_DIR, name, "recovery/root")
+
+
+def firmware_vars(tree, name):
+    """The variables of firmware/<name>/firmware.mk (unexpanded); {} if it is new."""
+    path = os.path.join(tree, FIRMWARE_DIR, name, FIRMWARE_MK)
+    return _read_raw_vars(path) if os.path.isfile(path) else {}
+
+
+def board_vars(tree, firmware=None):
+    """BoardConfig.mk's variables with the firmware set read in, as
+    firmware/firmware.mk includes it for A15_FIRMWARE=<firmware>.
+
+    firmware may name a set that does not exist yet (its prebuilt paths are
+    still worked out). Without sets, this is BoardConfig.mk alone.
+    """
+    raw = _read_raw_vars(os.path.join(tree, "BoardConfig.mk"))
+    if firmware:
+        raw.update(firmware_vars(tree, firmware))
+        raw["A15_FIRMWARE"] = firmware
+        raw["A15_FIRMWARE_DIR"] = f"$(DEVICE_PATH)/{FIRMWARE_DIR}/{firmware}"
+    return _expand_vars(raw, tree)
+
+
+def os_letter(firmware_id):
+    """The OS generation letter of a Samsung firmware or bootloader version,
+    the 4th character from the end: B in A155MUBS6BYE1. None if malformed."""
+    if not firmware_id or not re.match(r"^[A-Z0-9]{8,}$", firmware_id):
+        return None
+    letter = firmware_id[-4]
+    return letter if letter.isalpha() else None
 
 
 def mkbootimg_args(mv):

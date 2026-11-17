@@ -33,7 +33,12 @@ root() {
 	adb shell "su -c '$*'" | tr -d '\r'
 }
 
-echo "firmware: $(adb shell getprop ro.build.version.incremental | tr -d '\r')"
+# the vendor's version, not the system's: on a custom ROM only the vendor
+# and the bootloader are the stock firmware's, and the bootloader's OS
+# letter (4th character from the end) is the firmware set this belongs to
+vendor_fw=$(adb shell getprop ro.vendor.build.version.incremental | tr -d '\r')
+bootloader=$(adb shell getprop ro.boot.bootloader | tr -d '\r')
+echo "firmware: $vendor_fw (bootloader $bootloader)"
 echo "kernel:   $(adb shell uname -r | tr -d '\r')"
 
 # the directory that holds the touch drivers (vendor_dlkm on this device)
