@@ -2,11 +2,8 @@
 """Static checks of the a15 OrangeFox device tree against the OrangeFox
 maintainer guidelines and the tree's own consistency rules.
 
-usage: preflight.py <device tree dir> [--device a15] [--firmware <set>]
-                    [--device-info a15-device-info.txt]
-
-Checks every firmware set of the tree (firmware/<set>), or only the one
---firmware names. Exit status is non-zero if any check fails.
+usage: preflight.py <device tree dir> [--device a15] [--device-info a15-device-info.txt]
+Exit status is non-zero if any check fails.
 """
 
 import argparse
@@ -82,9 +79,6 @@ def check_layout(tree, device):
     stray = ["bootimg.mk", "prebuilt/kernel", "prebuilt/dtb.img", "prebuilt/dtbo.img",
              "recovery/root/dsms.rc", "recovery/root/dsms_common.rc",
              "recovery/root/vendor/etc/init.insmod.mt6789.cfg"]
-    if foxtools.firmware_sets(tree):
-        # each set has its own; copies left here would go into every build
-        stray += ["prebuilt", "recovery/root/lib/modules", "recovery/root/vendor/firmware"]
     left = [f for f in stray if os.path.exists(os.path.join(tree, f))]
     if left:
         fail("leftover files that should have been removed or renamed: " + ", ".join(left))
@@ -157,67 +151,11 @@ def check_boardconfig(tree):
             fail(f"{var} is set: shifting the UI to hide the cutout is not allowed, use OF_STATUS_H")
     if not re.search(r"^\s*TW_Y_OFFSET|^\s*TW_H_OFFSET", text, re.M):
         ok("no UI offsets")
-    mv = foxtools.board_vars(tree, foxtools.pick_firmware(tree))
+    mv = foxtools.read_make_vars(path, tree)
     for var in ("TARGET_PREBUILT_KERNEL", "TARGET_PREBUILT_DTB", "BOARD_PREBUILT_DTBOIMAGE"):
         if var not in mv:
             warn(f"{var} not set")
     return mv
-
-
-def check_firmware_wiring(tree, device):
-    """firmware/firmware.mk is read by both BoardConfig.mk and the product
-    makefile, and every set-specific value comes from it."""
-    print("firmware sets")
-    sets = foxtools.firmware_sets(tree)
-    if not sets:
-        warn("no firmware sets (firmware/<set>/firmware.mk); the tree builds for one One UI generation only")
-        return
-    ok(f"sets: {', '.join(sets)}; the default is {foxtools.default_firmware(tree)}")
-    if foxtools.default_firmware(tree) not in sets:
-        fail(f"firmware/firmware.mk defaults to {foxtools.default_firmware(tree)}, which is not a set")
-    # runatboot.sh can only tell a wrong build if each bootloader has one set
-    letters = {s: set(foxtools.firmware_vars(tree, s).get("A15_FIRMWARE_OS", "")) for s in sets}
-    for i, a in enumerate(sets):
-        for b in sets[i + 1:]:
-            shared = letters[a] & letters[b]
-            if shared:
-                fail(f"the sets {a} and {b} are both for OS {''.join(sorted(shared))} bootloaders")
-    board = open(os.path.join(tree, "BoardConfig.mk"), encoding="utf-8").read()
-    product_path = os.path.join(tree, f"twrp_{device}.mk")
-    product = open(product_path, encoding="utf-8").read() if os.path.isfile(product_path) else ""
-    include = "include $(DEVICE_PATH)/firmware/firmware.mk"
-    if include in board and re.search(r"^KERNEL_DIR\s*:=\s*\$\(A15_FIRMWARE_DIR\)/", board, re.M) \
-            and '--board "$(A15_BOARD_NAME)"' in board:
-        ok("BoardConfig.mk takes the kernel, DTB, DTBO and board name from the set")
-    else:
-        fail("BoardConfig.mk must include firmware/firmware.mk, set KERNEL_DIR from $(A15_FIRMWARE_DIR) "
-             "and pass --board \"$(A15_BOARD_NAME)\"")
-    if include in product and "$(A15_FIRMWARE_DIR)/recovery/root" in product:
-        ok(f"twrp_{device}.mk copies the set's recovery/root")
-    else:
-        fail(f"twrp_{device}.mk must include firmware/firmware.mk and copy $(A15_FIRMWARE_DIR)/recovery/root")
-    if "ro.vendor.a15.firmware.os=$(A15_FIRMWARE_OS)" in product:
-        ok("the build says which bootloaders it is for (ro.vendor.a15.firmware.os)")
-    else:
-        warn(f"twrp_{device}.mk does not set ro.vendor.a15.firmware.os, so a build on the wrong "
-             "bootloader goes unnoticed")
-
-
-def check_firmware_set(tree, name):
-    """The values firmware/<set>/firmware.mk must have."""
-    fv = foxtools.firmware_vars(tree, name)
-    missing = [v for v in foxtools.FIRMWARE_VARS if not fv.get(v)]
-    if missing:
-        fail(f"firmware/{name}/firmware.mk does not set " + ", ".join(missing))
-        return
-    build, letters = fv["A15_FIRMWARE_BUILD"], fv["A15_FIRMWARE_OS"]
-    letter = foxtools.os_letter(build)
-    if not re.match(r"^[A-Z]+$", letters):
-        fail(f"A15_FIRMWARE_OS={letters}: expected OS letters such as C")
-    elif letter not in letters:
-        fail(f"{build} is an OS {letter} firmware, but A15_FIRMWARE_OS is {letters}")
-    else:
-        ok(f"from {build}, board {fv['A15_BOARD_NAME']}, for OS {letters} bootloaders")
 
 
 def check_crypto(tree, mv, device):
@@ -410,7 +348,7 @@ def check_device_info(tree, report):
         fail("partitions used by the tree but missing on the phone: " + ", ".join(missing))
     else:
         ok(f"all {len(used)} by-name partitions exist on the phone")
-    mv = foxtools.board_vars(tree, foxtools.pick_firmware(tree))
+    mv = foxtools.read_make_vars(os.path.join(tree, "BoardConfig.mk"), tree)
     for part, var in (("recovery", "BOARD_RECOVERYIMAGE_PARTITION_SIZE"), ("boot", "BOARD_BOOTIMAGE_PARTITION_SIZE"),
                       ("super", "BOARD_SUPER_PARTITION_SIZE")):
         size = re.search(rf"^{part} (\d+)$", m.group(1), re.M)
@@ -421,8 +359,9 @@ def check_device_info(tree, report):
                 fail(f"{var}={mv[var]} but the phone's {part} is {size.group(1)} bytes")
 
 
-def check_modules(tree, mv, firmware):
-    root = foxtools.firmware_root(tree, firmware)
+def check_modules(tree, mv):
+    print("kernel modules")
+    root = os.path.join(tree, "recovery/root")
     libmod = os.path.join(root, "lib/modules")
     vendmod = os.path.join(root, "vendor/lib/modules")
     load_list = os.path.join(libmod, "modules.load.recovery")
@@ -460,6 +399,17 @@ def check_modules(tree, mv, firmware):
         else:
             warn(f"{ko} cannot load from the ramdisk ({why}); {role} needs the installed ROM's vendor_dlkm")
 
+    # OrangeFox checks TW_CUSTOM_CPU_TEMP_PATH once, at startup, before it
+    # loads TW_LOAD_VENDOR_MODULES; cpu_temp.sh makes the link from init
+    temp_path = mv.get("TW_CUSTOM_CPU_TEMP_PATH", "").strip('"')
+    if mv.get("TW_NO_CPU_TEMP") == "true":
+        ok("CPU temperature off (TW_NO_CPU_TEMP)")
+    elif temp_path == "/tmp/cpu_temp":
+        if os.path.isfile(os.path.join(root, "system/bin/cpu_temp.sh")):
+            ok("CPU temperature from /tmp/cpu_temp, linked by cpu_temp.sh")
+        else:
+            fail("TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but recovery/root/system/bin/cpu_temp.sh is missing")
+
     kernel = mv.get("TARGET_PREBUILT_KERNEL", "")
     if not os.path.isfile(kernel):
         warn("prebuilt kernel not found; skipping vermagic check")
@@ -478,58 +428,29 @@ def check_modules(tree, mv, firmware):
 
     for var, label in (("TARGET_PREBUILT_DTB", "dtb"), ("BOARD_PREBUILT_DTBOIMAGE", "dtbo")):
         p = mv.get(var, "")
-        if not os.path.isfile(p):
-            fail(f"{label} {os.path.relpath(p, tree) if p else '(not set)'} is missing")
-            continue
-        with open(p, "rb") as f:
-            magic = f.read(4)
-        if magic != foxtools.DT_TABLE_MAGIC:
-            warn(f"{label} image does not start with the DT table magic")
-
-
-def check_cpu_temp(tree, mv):
-    # OrangeFox checks TW_CUSTOM_CPU_TEMP_PATH once, at startup, before it
-    # loads TW_LOAD_VENDOR_MODULES; cpu_temp.sh makes the link from init
-    print("CPU temperature")
-    temp_path = mv.get("TW_CUSTOM_CPU_TEMP_PATH", "").strip('"')
-    if mv.get("TW_NO_CPU_TEMP") == "true":
-        ok("off (TW_NO_CPU_TEMP)")
-    elif temp_path == "/tmp/cpu_temp":
-        if os.path.isfile(os.path.join(tree, "recovery/root/system/bin/cpu_temp.sh")):
-            ok("from /tmp/cpu_temp, linked by cpu_temp.sh")
-        else:
-            fail("TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but recovery/root/system/bin/cpu_temp.sh is missing")
-    else:
-        ok(f"TW_CUSTOM_CPU_TEMP_PATH={temp_path or '(not set)'}")
+        if os.path.isfile(p):
+            with open(p, "rb") as f:
+                magic = f.read(4)
+            if magic != foxtools.DT_TABLE_MAGIC:
+                warn(f"{label} image does not start with the DT table magic")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("tree")
     ap.add_argument("--device", default="a15")
-    ap.add_argument("--firmware", help="check only this firmware set (default: all of them)")
     ap.add_argument("--device-info", help="report written by device-info.sh; checks partitions and sizes")
     args = ap.parse_args()
     tree = os.path.abspath(args.tree)
     if not os.path.isfile(os.path.join(tree, "BoardConfig.mk")):
         foxtools.die(f"{tree} does not look like a device tree")
-    sets = foxtools.firmware_sets(tree)
-    if args.firmware:
-        foxtools.pick_firmware(tree, args.firmware)
-        sets = [args.firmware]
 
     check_layout(tree, args.device)
     check_vendorsetup(tree, args.device)
     mv = check_boardconfig(tree)
     check_fstab(tree)
     check_crypto(tree, mv, args.device)
-    check_cpu_temp(tree, mv)
-    check_firmware_wiring(tree, args.device)
-    for name in sets or [None]:
-        print(f"firmware set {name}" if name else "kernel modules")
-        if name:
-            check_firmware_set(tree, name)
-        check_modules(tree, foxtools.board_vars(tree, name), name)
+    check_modules(tree, mv)
     if args.device_info:
         check_device_info(tree, args.device_info)
 

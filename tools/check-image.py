@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Check a built a15 recovery image before it is flashed or released.
 
-usage: check-image.py <OrangeFox-*.img> <device tree dir> [--firmware <set>]
+usage: check-image.py <OrangeFox-*.img> <device tree dir>
 
 Verifies that the image matches the stock recovery layout configured in
-BoardConfig.mk and the firmware set it was built with (--firmware, else
-$A15_FIRMWARE, else the tree's default), carries SEANDROIDENFORCE and an
-AVB hash footer, fits the recovery partition, and that the kernel and every
-module in the ramdisk belong together.
+BoardConfig.mk, carries SEANDROIDENFORCE and an AVB hash footer, fits the
+recovery partition, and that the kernel and every module in the ramdisk
+belong together.
 """
 
 import argparse
@@ -38,16 +37,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("image")
     ap.add_argument("tree")
-    ap.add_argument("--firmware", help="the firmware set the image was built with")
     args = ap.parse_args()
 
     data = open(args.image, "rb").read()
-    tree = os.path.abspath(args.tree)
-    firmware = foxtools.pick_firmware(tree, args.firmware)
-    mv = foxtools.board_vars(tree, firmware)
+    mv = foxtools.read_make_vars(os.path.join(args.tree, "BoardConfig.mk"))
     hdr, sec = foxtools.parse_bootimg(data)
-    if firmware:
-        print(f"firmware set {firmware}")
 
     print("header")
     args_mk = foxtools.mkbootimg_args(mv)
@@ -105,15 +99,9 @@ def main():
     names = set()
     boot_list = None
     rc_text = ""
-    props = {}
     bad = []
     for name, _mode, payload in foxtools.cpio_entries(ramdisk):
         names.add(name)
-        if name == "prop.default":
-            for line in payload.decode("utf-8", "replace").splitlines():
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    props[k.strip()] = v.strip()
         if "/" not in name and name.endswith(".rc"):
             rc_text += payload.decode("utf-8", "replace") + "\n"
         if name == foxtools.TEE_BOOT_LIST[len("recovery/root/"):]:
@@ -130,7 +118,7 @@ def main():
         if name == "lib/modules/modules.dep":
             dep_text = payload.decode(errors="replace")
     deps = foxtools.parse_modules_dep(dep_text)
-    for ko in foxtools.tw_vendor_modules(os.path.join(tree, "BoardConfig.mk")):
+    for ko in foxtools.tw_vendor_modules(os.path.join(args.tree, "BoardConfig.mk")):
         missing = [d for d in deps.get(ko, []) if f"lib/modules/{d}" not in names]
         role = foxtools.vendor_module_role(ko)
         if f"lib/modules/{ko}" in names and ko in deps and not missing:
@@ -146,21 +134,9 @@ def main():
     for f in ("system/etc/recovery.fstab", "system/etc/twrp.flags", "lib/modules/modules.load.recovery"):
         check(f in names, f"{f} in ramdisk", f"{f} missing from the ramdisk")
 
-    if firmware:
-        print("firmware set")
-        kernel = mv.get("TARGET_PREBUILT_KERNEL", "")
-        want = foxtools.kernel_release(open(kernel, "rb").read()) if os.path.isfile(kernel) else None
-        check(release is not None and release == want, f"kernel {release} is the {firmware} set's",
-              f"kernel {release}, but the {firmware} set's is {want}")
-        letters = foxtools.firmware_vars(tree, firmware).get("A15_FIRMWARE_OS", "")
-        got = (props.get("ro.vendor.a15.firmware"), props.get("ro.vendor.a15.firmware.os"))
-        check(got == (firmware, letters), f"ro.vendor.a15.firmware={firmware}, for OS {letters} bootloaders",
-              f"prop.default has ro.vendor.a15.firmware={got[0]} and .os={got[1]}, "
-              f"expected {firmware} and {letters}")
-
     if crypto:
         print("decryption")
-        _meta, files = foxtools.read_tee_manifest(tree)
+        _meta, files = foxtools.read_tee_manifest(args.tree)
         wanted = [rel[len("recovery/root/"):] for _sha, rel, _phone in files] + [
             "init.recovery.teegris.rc", "system/bin/prepare_tee.sh"]
         missing = [w for w in wanted if w not in names]

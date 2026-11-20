@@ -34,8 +34,8 @@ root() {
 }
 
 # the vendor's version, not the system's: on a custom ROM only the vendor
-# and the bootloader are the stock firmware's, and the bootloader's OS
-# letter (4th character from the end) is the firmware set this belongs to
+# and the bootloader are the stock firmware's, and the modules come from
+# the vendor
 vendor_fw=$(adb shell getprop ro.vendor.build.version.incremental | tr -d '\r')
 bootloader=$(adb shell getprop ro.boot.bootloader | tr -d '\r')
 echo "firmware: $vendor_fw (bootloader $bootloader)"
