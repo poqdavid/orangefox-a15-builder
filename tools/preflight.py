@@ -7,6 +7,7 @@ Exit status is non-zero if any check fails.
 """
 
 import argparse
+import glob
 import hashlib
 import os
 import re
@@ -409,6 +410,19 @@ def check_modules(tree, mv):
             ok("CPU temperature from /tmp/cpu_temp, linked by cpu_temp.sh")
         else:
             fail("TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but recovery/root/system/bin/cpu_temp.sh is missing")
+
+    # The Zinitix driver flashes this file at every probe, and afterwards the
+    # controller stays dead until the display is power cycled, which recovery
+    # never does (see the tree's zinitix_touch.sh)
+    zinitix_fw = [os.path.relpath(p, tree) for d in ("vendor/firmware", "lib/firmware", "system/etc/firmware")
+                  for p in glob.glob(os.path.join(root, d, "zt7650m*.bin"))]
+    if zinitix_fw:
+        fail(f"{', '.join(zinitix_fw)} is in the ramdisk: the Zinitix driver would flash it and leave touch dead")
+    elif os.path.isfile(os.path.join(root, "system/bin/zinitix_touch.sh")):
+        ok("no Zinitix touch firmware in the ramdisk; zinitix_touch.sh loads the driver early")
+    elif "zt7650m_ts.ko" in foxtools.tw_vendor_modules(os.path.join(tree, "BoardConfig.mk")):
+        warn("zinitix_touch.sh is missing: OrangeFox loads zt7650m_ts.ko once the installed vendor is "
+             "mounted, and the driver flashes its firmware from there")
 
     kernel = mv.get("TARGET_PREBUILT_KERNEL", "")
     if not os.path.isfile(kernel):

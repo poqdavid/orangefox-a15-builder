@@ -13,10 +13,11 @@ Replaces, all from the same stock image:
 --vendor-files is the directory written by pull-vendor-files.sh on a phone
 running the SAME firmware: the modules on TW_LOAD_VENDOR_MODULES (the touch
 drivers and soc_temp_lvts.ko for the CPU temperature), every module they
-depend on, vendor_dlkm's modules.dep and the touch firmware. With it, they
-and their missing dependencies are installed into the ramdisk's
-/lib/modules with modules.dep entries, so the recovery can load them
-without a ROM installed. An optional module the phone does not have is
+depend on, vendor_dlkm's modules.dep and the FocalTech touch firmware.
+With it, they and their missing dependencies are installed into the
+ramdisk's /lib/modules with modules.dep entries, so the recovery can load
+them without a ROM installed. The Zinitix touch firmware is never
+installed (see the tree's zinitix_touch.sh). An optional module the phone does not have is
 skipped. Without it, the tree keeps the vendor modules it has.
 """
 
@@ -272,6 +273,11 @@ def main():
         if os.path.isdir(vend_dir) and not os.listdir(vend_dir):
             os.rmdir(vend_dir)
         for fw in sorted(glob.glob(os.path.join(args.vendor_files, "*.bin"))):
+            # the Zinitix driver would flash it at every boot and leave touch
+            # dead; older pulls still have it
+            if os.path.basename(fw).startswith("zt7650m"):
+                print(f"skipped {os.path.basename(fw)}: the recovery must not have the Zinitix touch firmware")
+                continue
             os.makedirs(fw_dir, exist_ok=True)
             shutil.copyfile(fw, os.path.join(fw_dir, os.path.basename(fw)))
 

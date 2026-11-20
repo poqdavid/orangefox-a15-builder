@@ -2,7 +2,7 @@
 #
 # Copy the touchscreen modules, the SoC temperature sensor module
 # (soc_temp_lvts.ko, for the CPU temperature), everything they depend on,
-# modules.dep and the touch firmware from a rooted phone, for
+# modules.dep and the FocalTech touch firmware from a rooted phone, for
 # extract-prebuilts.py --vendor-files. The phone must run the SAME stock
 # firmware as the recovery image you extract the kernel from.
 #
@@ -21,7 +21,10 @@ dump_recovery=${2:-}
 modules=(zt7650m_ts.ko focaltech_ts_ft3418.ko)
 # skipped with a note if the firmware does not have them
 optional=(soc_temp_lvts.ko)
-firmware=(zt7650m_a15.bin ft3418_a15.bin)
+# not zt7650m_a15.bin: with it in the ramdisk, the Zinitix driver flashes the
+# controller at every boot and touch stays dead (see the tree's
+# zinitix_touch.sh)
+firmware=(ft3418_a15.bin)
 
 command -v adb >/dev/null || { echo "adb not found" >&2; exit 1; }
 adb get-state >/dev/null || { echo "no device connected" >&2; exit 1; }

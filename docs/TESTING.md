@@ -71,7 +71,10 @@ ROMs (each Android version the device has):
 Device:
 
 - [ ] Touch on both panel types if you can borrow one (Zinitix ZT7650M and
-      FocalTech FT3418)
+      FocalTech FT3418). `adb shell cat /proc/tsp_msg` says which driver
+      bound. On a Zinitix panel it should say `Firmware image
+      zt7650m_a15.bin not available` and have no `[UPGRADE]` lines, and
+      `dmesg | grep zinitix_touch` that the touch is up
 - [ ] Touch with stock firmware installed, and again with `super` wiped or
       a GSI installed (works only once the touch drivers load from the
       ramdisk, see below)
