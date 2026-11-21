@@ -133,10 +133,14 @@ def main():
               "TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but cpu_temp.sh is missing or not run by init")
     for f in ("system/etc/recovery.fstab", "system/etc/twrp.flags", "lib/modules/modules.load.recovery"):
         check(f in names, f"{f} in ramdisk", f"{f} missing from the ramdisk")
-    # with it, the Zinitix driver flashes the controller and touch stays dead
+    # with it, zinitix_touch.sh leaves the driver to OrangeFox, which never
+    # turns the display off and on, so Zinitix touch stays dead
     zinitix_fw = sorted(n for n in names if os.path.basename(n).startswith("zt7650m") and n.endswith(".bin"))
     check(not zinitix_fw, "no Zinitix touch firmware in the ramdisk",
-          f"{', '.join(zinitix_fw)} in the ramdisk: the Zinitix driver would flash it and leave touch dead")
+          f"{', '.join(zinitix_fw)} in the ramdisk: zinitix_touch.sh would skip Zinitix touch and leave it dead")
+    if "system/bin/zinitix_touch.sh" in names:
+        check("system/bin/display_cycle" in names, "display_cycle in the ramdisk for zinitix_touch.sh",
+              "display_cycle missing from the ramdisk: Zinitix touch would stay dead")
 
     if crypto:
         print("decryption")

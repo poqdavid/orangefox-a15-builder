@@ -360,6 +360,16 @@ def check_device_info(tree, report):
                 fail(f"{var}={mv[var]} but the phone's {part} is {size.group(1)} bytes")
 
 
+def defines_module(tree, name):
+    """Whether an Android.bp in the tree defines a Soong module called name."""
+    pattern = re.compile(r'\bname:\s*"%s"' % re.escape(name))
+    for bp in glob.glob(os.path.join(tree, "**", "Android.bp"), recursive=True):
+        with open(bp, encoding="utf-8") as f:
+            if pattern.search(f.read()):
+                return True
+    return False
+
+
 def check_modules(tree, mv):
     print("kernel modules")
     root = os.path.join(tree, "recovery/root")
@@ -411,18 +421,26 @@ def check_modules(tree, mv):
         else:
             fail("TW_CUSTOM_CPU_TEMP_PATH is /tmp/cpu_temp but recovery/root/system/bin/cpu_temp.sh is missing")
 
-    # The Zinitix driver flashes this file at every probe, and afterwards the
-    # controller stays dead until the display is power cycled, which recovery
-    # never does (see the tree's zinitix_touch.sh)
+    # Zinitix touch only works once the display has been turned off and on.
+    # zinitix_touch.sh does that with display_cycle, and loads the driver
+    # before the installed vendor is mounted so that it does not spend 18
+    # seconds flashing this file; it gives up if the ramdisk has a copy
     zinitix_fw = [os.path.relpath(p, tree) for d in ("vendor/firmware", "lib/firmware", "system/etc/firmware")
                   for p in glob.glob(os.path.join(root, d, "zt7650m*.bin"))]
     if zinitix_fw:
-        fail(f"{', '.join(zinitix_fw)} is in the ramdisk: the Zinitix driver would flash it and leave touch dead")
+        fail(f"{', '.join(zinitix_fw)} is in the ramdisk: zinitix_touch.sh would skip Zinitix touch and leave it dead")
     elif os.path.isfile(os.path.join(root, "system/bin/zinitix_touch.sh")):
         ok("no Zinitix touch firmware in the ramdisk; zinitix_touch.sh loads the driver early")
+        if "display_cycle" not in mv.get("TARGET_RECOVERY_DEVICE_MODULES", "").split():
+            fail("display_cycle is not on TARGET_RECOVERY_DEVICE_MODULES: zinitix_touch.sh needs it, "
+                 "or Zinitix touch stays dead")
+        elif not defines_module(tree, "display_cycle"):
+            fail("TARGET_RECOVERY_DEVICE_MODULES has display_cycle, but no Android.bp in the tree defines it")
+        else:
+            ok("display_cycle is built for zinitix_touch.sh")
     elif "zt7650m_ts.ko" in foxtools.tw_vendor_modules(os.path.join(tree, "BoardConfig.mk")):
-        warn("zinitix_touch.sh is missing: OrangeFox loads zt7650m_ts.ko once the installed vendor is "
-             "mounted, and the driver flashes its firmware from there")
+        warn("zinitix_touch.sh is missing: Zinitix touch stays dead until the display has been off, and "
+             "the driver flashes its firmware from the installed vendor for 18 seconds")
 
     kernel = mv.get("TARGET_PREBUILT_KERNEL", "")
     if not os.path.isfile(kernel):

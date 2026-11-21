@@ -72,9 +72,13 @@ Device:
 
 - [ ] Touch on both panel types if you can borrow one (Zinitix ZT7650M and
       FocalTech FT3418). `adb shell cat /proc/tsp_msg` says which driver
-      bound. On a Zinitix panel it should say `Firmware image
-      zt7650m_a15.bin not available` and have no `[UPGRADE]` lines, and
-      `dmesg | grep zinitix_touch` that the touch is up
+      bound. On a Zinitix panel the screen goes black for about a second
+      before OrangeFox appears, and touch works straight away.
+      `/tmp/recovery.log` should have `zinitix_touch: Zinitix touch is up`
+      and `display_cycle: display on`, and `/proc/tsp_msg` should say
+      `Firmware image zt7650m_a15.bin not available` with no `[UPGRADE]`
+      lines. On a FocalTech panel, `/tmp/recovery.log` should say there is
+      no Zinitix touch controller
 - [ ] Touch with stock firmware installed, and again with `super` wiped or
       a GSI installed (works only once the touch drivers load from the
       ramdisk, see below)
