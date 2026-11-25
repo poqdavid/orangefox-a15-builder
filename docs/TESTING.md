@@ -84,6 +84,11 @@ Device:
       ramdisk, see below)
 - [ ] Brightness slider covers the full range without jumping to HBM
 - [ ] Battery percentage and charging indicator
+- [ ] Charging from a PC's USB port, with the screen on:
+      `adb shell cat /sys/class/power_supply/battery/current_now` is
+      positive, and `adb shell "logcat -b kernel -d | grep 'usb configured'"`
+      shows `0 -> 475`. Without the tree's ss_mon function the battery
+      driver keeps the port at 100 mA and the battery drains
 - [ ] CPU temperature in the status bar, close to what Android shows for
       `soc_max`; `adb shell "ls -l /tmp/cpu_temp"` points at a
       thermal zone and `adb shell "dmesg | grep cpu_temp"` names it. Needs
