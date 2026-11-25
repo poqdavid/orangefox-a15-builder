@@ -12,8 +12,9 @@ Replaces, all from the same stock image:
 
 --vendor-files is the directory written by pull-vendor-files.sh on a phone
 running the SAME firmware: the modules on TW_LOAD_VENDOR_MODULES (the touch
-drivers and soc_temp_lvts.ko for the CPU temperature), every module they
-depend on, vendor_dlkm's modules.dep and the FocalTech touch firmware.
+drivers, soc_temp_lvts.ko for the CPU temperature and leds-sm5714-fled.ko
+for the flashlight), every module they depend on, vendor_dlkm's modules.dep
+and the FocalTech touch firmware.
 With it, they and their missing dependencies are installed into the
 ramdisk's /lib/modules with modules.dep entries, so the recovery can load
 them without a ROM installed. The Zinitix touch firmware is never

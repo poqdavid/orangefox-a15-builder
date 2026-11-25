@@ -52,11 +52,13 @@ mka adbd recoveryimage
 ### Refreshing the prebuilts from newer firmware
 
 The tree's kernel, DTB, DTBO and modules all come from one stock firmware
-(named in the tree's README). The touch drivers and the SoC temperature
-sensor driver (`soc_temp_lvts.ko`, for the CPU temperature) are not part of
-the stock recovery: they and `tuihw-inf.ko`, which the touch drivers need,
-are taken from `vendor_dlkm`. To move to a newer firmware, use a rooted phone running that
-stock firmware.
+(named in the tree's README). The touch drivers, the SoC temperature
+sensor driver (`soc_temp_lvts.ko`, for the CPU temperature) and the flash
+LED driver (`leds-sm5714-fled.ko`, for the flashlight) are not part of the
+stock recovery: they and the modules they need that the stock recovery
+lacks (`tuihw-inf.ko` for touch, `imgsensor_isp6s.ko` and
+`dev_ril_bridge.ko` for the flash LED) are taken from `vendor_dlkm`. To
+move to a newer firmware, use a rooted phone running that stock firmware.
 
 ```bash
 # --recovery also dumps the phone's recovery partition (only while it is still stock)
@@ -69,13 +71,15 @@ tools/preflight.py ~/fox_12.1/device/samsung/a15
 If the phone already has a custom recovery, pass the AP file instead:
 `--recovery AP_A155F...tar.md5`.
 
-`pull-vendor-files.sh` copies the touch drivers, `soc_temp_lvts.ko`, every
-module they depend on and `modules.dep`. `extract-prebuilts.py` installs the
-ones the stock recovery lacks into the ramdisk's `/lib/modules` with their
-`modules.dep` entries, so touch no longer depends on the installed ROM and
-the tree's `cpu_temp.sh` can load the temperature sensor before OrangeFox
-starts. A firmware without `soc_temp_lvts.ko` is skipped with a warning. It refuses to
-write a tree that mixes modules from different kernel builds, and prints
+`pull-vendor-files.sh` copies the touch drivers, `soc_temp_lvts.ko`,
+`leds-sm5714-fled.ko`, every module they depend on and `modules.dep`.
+`extract-prebuilts.py` installs the ones the stock recovery lacks into the
+ramdisk's `/lib/modules` with their `modules.dep` entries, so touch no
+longer depends on the installed ROM, the tree's `cpu_temp.sh` can load the
+temperature sensor before OrangeFox starts, and OrangeFox can load the
+flash LED driver. A firmware without `soc_temp_lvts.ko` or
+`leds-sm5714-fled.ko` is skipped with a warning. It refuses to write a
+tree that mixes modules from different kernel builds, and prints
 any difference between the stock image layout and `BoardConfig.mk`. Use
 `--dry-run` to only compare.
 

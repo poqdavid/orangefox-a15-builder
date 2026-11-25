@@ -91,6 +91,11 @@ Device:
       `extract-prebuilts.py --vendor-files`); without it the temperature is
       hidden
 - [ ] Vibration (sec_vibrator, `/sys/class/timed_output/vibrator`)
+- [ ] Flashlight turns the torch on and off, and
+      `adb shell "cat /sys/class/camera/flash/rear_flash"` follows it (1,
+      then 0). Needs `leds-sm5714-fled.ko` in the ramdisk
+      (`pull-vendor-files.sh` and `extract-prebuilts.py --vendor-files`);
+      without it the flashlight does nothing
 - [ ] Status bar clears the cutout; clock left and right; rounded corners
 
 ## Decryption
@@ -165,6 +170,7 @@ shows where decryption stopped. `keys.txt` must have a `keyring` named
   OrangeFox starts without decryption.
 - Settings, themes and the recovery password are stored in the cache
   partition (`/cache/Fox`), so wiping cache resets them.
-- No flashlight (the flash LED modules aren't in the recovery ramdisk).
+- No flashlight unless `leds-sm5714-fled.ko` was added to the ramdisk
+  from the same firmware as the kernel.
 - No CPU temperature unless `soc_temp_lvts.ko` was added to the ramdisk
   from the same firmware as the kernel.

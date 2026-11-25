@@ -321,7 +321,11 @@ def tw_vendor_modules(boardconfig):
 # vendor_dlkm modules on TW_LOAD_VENDOR_MODULES that only add a feature; the
 # others are the touch drivers. cpu_temp.sh loads soc_temp_lvts.ko from the
 # ramdisk before OrangeFox starts, so it has no fallback to the ROM.
-OPTIONAL_VENDOR_MODULES = {"soc_temp_lvts.ko": "CPU temperature"}
+# leds-sm5714-fled.ko makes the torch's rear_flash file.
+OPTIONAL_VENDOR_MODULES = {
+    "soc_temp_lvts.ko": "CPU temperature",
+    "leds-sm5714-fled.ko": "flashlight",
+}
 
 
 def vendor_module_role(module):

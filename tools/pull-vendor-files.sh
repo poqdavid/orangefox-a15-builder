@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Copy the touchscreen modules, the SoC temperature sensor module
-# (soc_temp_lvts.ko, for the CPU temperature), everything they depend on,
+# (soc_temp_lvts.ko, for the CPU temperature), the flash LED module
+# (leds-sm5714-fled.ko, for the flashlight), everything they depend on,
 # modules.dep and the FocalTech touch firmware from a rooted phone, for
 # extract-prebuilts.py --vendor-files. The phone must run the SAME stock
 # firmware as the recovery image you extract the kernel from.
@@ -20,7 +21,7 @@ out=${1:?usage: pull-vendor-files.sh <output dir> [--recovery]}
 dump_recovery=${2:-}
 modules=(zt7650m_ts.ko focaltech_ts_ft3418.ko)
 # skipped with a note if the firmware does not have them
-optional=(soc_temp_lvts.ko)
+optional=(soc_temp_lvts.ko leds-sm5714-fled.ko)
 # not zt7650m_a15.bin: with it in the ramdisk, the Zinitix driver flashes the
 # controller at every boot and touch stays dead (see the tree's
 # zinitix_touch.sh)

@@ -392,7 +392,8 @@ def check_modules(tree, mv):
     # Touch drivers: the recovery can only load them from the ramdisk when they
     # sit in /lib/modules with modules.dep entries and all dependencies, and
     # TW_LOAD_VENDOR_BOOT_MODULES is set. Otherwise it needs the ROM's vendor_dlkm.
-    # The optional ones (soc_temp_lvts.ko) only ever load from the ramdisk.
+    # The optional ones (soc_temp_lvts.ko, leds-sm5714-fled.ko) only add a
+    # feature, so a missing one is a warning.
     boot_modules = mv.get("TW_LOAD_VENDOR_BOOT_MODULES") == "true"
     for ko in foxtools.tw_vendor_modules(os.path.join(tree, "BoardConfig.mk")):
         why = foxtools.ramdisk_loadable(libmod, ko)
